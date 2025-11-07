@@ -1,0 +1,31 @@
+// Top-level build file where you can add configuration options common to all sub-projects/modules.
+
+// Build plugin and dependencies for gradle
+buildscript {
+    // Specify where to download the needed plugin and dependencies
+    repositories {
+        google()
+        jcenter()
+    }
+
+    dependencies {
+        // plugin for gradle
+        classpath 'com.android.tools.build:gradle:8.0.2'
+        // plugin for protocol buffer, usually used in serialization
+        classpath 'com.google.protobuf:protobuf-gradle-plugin:0.9.2'
+    }
+}
+
+// Build plugin and dependencies for all modules in this project
+allprojects {
+    repositories {
+        google()
+        jcenter()
+    }
+}
+
+// define a gradle task to cleanup all the plugin and dependencies
+// execute ./gradlew clean in terminal
+task clean(type: Delete) {
+    delete rootProject.buildDir
+}

@@ -1,0 +1,20 @@
+                        -H/home/yihaosun/Desktop/YihaoSun/15821/15821p5_client/app/src/main/cpp
+-DCMAKE_SYSTEM_NAME=Android
+-DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+-DCMAKE_SYSTEM_VERSION=27
+-DANDROID_PLATFORM=android-27
+-DANDROID_ABI=arm64-v8a
+-DCMAKE_ANDROID_ARCH_ABI=arm64-v8a
+-DANDROID_NDK=/home/yihaosun/Android/Sdk/ndk/25.1.8937393
+-DCMAKE_ANDROID_NDK=/home/yihaosun/Android/Sdk/ndk/25.1.8937393
+-DCMAKE_TOOLCHAIN_FILE=/home/yihaosun/Android/Sdk/ndk/25.1.8937393/build/cmake/android.toolchain.cmake
+-DCMAKE_MAKE_PROGRAM=/home/yihaosun/Android/Sdk/cmake/3.22.1/bin/ninja
+-DCMAKE_CXX_FLAGS=-std=c++17 -O3
+-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=/home/yihaosun/Desktop/YihaoSun/15821/15821p5_client/app/build/intermediates/cxx/Debug/6t3j5h4f/obj/arm64-v8a
+-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=/home/yihaosun/Desktop/YihaoSun/15821/15821p5_client/app/build/intermediates/cxx/Debug/6t3j5h4f/obj/arm64-v8a
+-DCMAKE_BUILD_TYPE=Debug
+-B/home/yihaosun/Desktop/YihaoSun/15821/15821p5_client/app/.cxx/Debug/6t3j5h4f/arm64-v8a
+-GNinja
+-DOpenCV_DIR=/home/yihaosun/Android/OpenCV-android-sdk/sdk/native/jni
+                        Build command args: []
+                        Version: 2

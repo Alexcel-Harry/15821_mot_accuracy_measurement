@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <!-- 左边：本地预览 -->
+    <FrameLayout
+        android:id="@+id/frameLocal"
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toStartOf="@+id/frameRemote">
+
+        <androidx.camera.view.PreviewView
+            android:id="@+id/viewFinder"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:scaleType="centerCrop"/>
+
+        <edu.cmu.cs.face.OverlayView
+            android:id="@+id/localOverlay"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="@android:color/transparent"
+            android:clickable="false" />
+
+        <TextView
+            android:id="@+id/tv_local"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Original"
+            android:textStyle="bold"
+            android:background="#80000000"
+            android:textColor="@android:color/white"
+            android:padding="4dp"
+            android:layout_gravity="top|center_horizontal"/>
+    </FrameLayout>
+
+    <!-- 右边：远端处理结果 -->
+    <FrameLayout
+        android:id="@+id/frameRemote"
+        android:layout_width="0dp"
+        android:layout_height="match_parent"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toEndOf="@id/frameLocal"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <ImageView
+            android:id="@+id/remoteImageView"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:scaleType="centerCrop"
+            android:contentDescription="Processed image" />
+
+        <edu.cmu.cs.face.OverlayView
+            android:id="@+id/annotationView"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="@android:color/transparent"
+            android:clickable="false" />
+
+        <TextView
+            android:id="@+id/tv_remote"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Processed"
+            android:textStyle="bold"
+            android:background="#80000000"
+            android:textColor="@android:color/white"
+            android:padding="4dp"
+            android:layout_gravity="top|center_horizontal"/>
+    </FrameLayout>
+
+    <!-- 切换摄像头按钮放在右下角 -->
+    <ImageView
+        android:id="@+id/imgSwitchCam"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:layout_margin="12dp"
+        android:src="@drawable/ic_cached_black_24dp"
+        android:contentDescription="Switch the Camera"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"/>
+</androidx.constraintlayout.widget.ConstraintLayout>

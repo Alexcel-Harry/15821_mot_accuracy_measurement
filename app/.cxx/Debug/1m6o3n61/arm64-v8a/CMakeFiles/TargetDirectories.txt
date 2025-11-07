@@ -1,0 +1,3 @@
+/home/yihaosun/Desktop/YihaoSun/15821/15821p5_client/app/.cxx/Debug/1m6o3n61/arm64-v8a/CMakeFiles/bytetrack_jni.dir
+/home/yihaosun/Desktop/YihaoSun/15821/15821p5_client/app/.cxx/Debug/1m6o3n61/arm64-v8a/CMakeFiles/edit_cache.dir
+/home/yihaosun/Desktop/YihaoSun/15821/15821p5_client/app/.cxx/Debug/1m6o3n61/arm64-v8a/CMakeFiles/rebuild_cache.dir

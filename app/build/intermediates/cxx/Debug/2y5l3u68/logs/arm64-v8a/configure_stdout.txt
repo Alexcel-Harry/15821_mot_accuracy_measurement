@@ -1,0 +1,9 @@
+-- BUILD_HYBRID = ON
+-- OpenCV_DIR provided: /home/yihaosun/Android/OpenCV-android-sdk/sdk/native/jni
+-- OpenCV version: 4.12.0
+-- OpenCV include dirs: /home/yihaosun/Android/OpenCV-android-sdk/sdk/native/jni/include
+-- Eigen include path: /home/yihaosun/Desktop/YihaoSun/15821/15821p5_client/app/src/main/cpp/eigen
+-- Using HybridTrackerJNI.cpp
+-- Configuring done
+-- Generating done
+-- Build files have been written to: /home/yihaosun/Desktop/YihaoSun/15821/15821p5_client/app/.cxx/Debug/2y5l3u68/arm64-v8a

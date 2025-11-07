@@ -1,0 +1,684 @@
+package edu.cmu.cs.face;
+
+import android.content.res.AssetFileDescriptor;
+import android.os.Bundle;
+import android.util.Log;
+
+import androidx.appcompat.app.AppCompatActivity;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.Color;
+import android.graphics.RectF;
+import android.os.Build;
+import android.os.Bundle;
+import android.util.Log;
+
+import org.tensorflow.lite.DataType;
+import org.tensorflow.lite.Interpreter;
+import org.tensorflow.lite.Tensor;
+import org.tensorflow.lite.nnapi.NnApiDelegate;
+
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.nio.MappedByteBuffer;
+import java.nio.channels.FileChannel;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+
+/**
+ * Minimal MOT Measurement App - No UI, Just Measurement
+ *
+ * Configure the path and FPS below, then run.
+ * App will process the sequence and exit automatically.
+ */
+public class MeasurementActivity extends AppCompatActivity {
+    private static final String TAG = "MeasurementActivity";
+
+    static {
+        System.loadLibrary("bytetrack_jni");
+    }
+
+    // ============================================================================
+    // CONFIGURATION - MODIFY THESE VALUES
+    // ============================================================================
+
+    /**
+     * Path to the sequence folder (containing img1/ subdirectory)
+     *
+     * Example: "/sdcard/MOT17/train/MOT17-02-DPM"
+     *
+     * Structure expected:
+     *   /sdcard/MOT17/train/MOT17-02-DPM/
+     *     img1/
+     *       000001.jpg
+     *       000002.jpg
+     *       ...
+     */
+    private static final String SEQUENCE_PATH = "/sdcard/MOT17/train/MOT17-02-DPM";
+
+    /**
+     * FPS for Kalman filter
+     * TODO: Set this to your video's actual frame rate!
+     *
+     * This affects:
+     * - Kalman filter time step (dt = 1.0 / FPS)
+     * - Track buffer timeout
+     * - Motion prediction
+     */
+    private static final int VIDEO_FPS = 30;  // TODO: CHANGE THIS!
+
+    /**
+     * Track buffer (frames to keep lost tracks)
+     * Recommended: Set equal to VIDEO_FPS (1 second buffer)
+     */
+    private static final int TRACK_BUFFER = 30;  // TODO: Usually same as VIDEO_FPS
+
+    /**
+     * Keyframe interval (run YOLO every N frames)
+     * Higher = faster, Lower = more accurate
+     */
+    private static final int KEYFRAME_INTERVAL = 10;
+
+    /**
+     * Detection confidence threshold
+     */
+    private static final float CONFIDENCE_THRESHOLD = 0.15f;
+
+    /**
+     * NMS IoU threshold
+     */
+    private static final float NMS_THRESHOLD = 0.5f;
+
+    // ============================================================================
+    // END CONFIGURATION
+    // ============================================================================
+
+    // Model file name
+    private static final String MODEL_FILE = "yolo11n_full_integer_quant.tflite";
+
+    // TFLite interpreter
+    private Interpreter tflite = null;
+    private NnApiDelegate nnApiDelegate = null;
+    private int[] inputShape = null;
+    private DataType inputDataType = null;
+    private int outputCount = 0;
+    private int[][] outputShapes = null;
+    private DataType[] outputDataTypes = null;
+
+    // Tracker
+    private long hybridTrackerHandle = 0;
+
+    // Native methods
+    public native long nativeInitHybridTracker(int frameRate, int trackBuffer, int keyframeInterval);
+    public native void nativeReleaseHybridTracker(long trackerPtr);
+    public native boolean nativeIsKeyframe(long trackerPtr);
+    public native float[] nativeUpdateWithDetections(long trackerPtr, float[] detections, byte[] imageData, int w, int h);
+    public native float[] nativeUpdateWithoutDetections(long trackerPtr, byte[] imageData, int w, int h);
+
+    // Detection class
+    private static class Detection {
+        float cx, cy, w, h;
+        int classId;
+        float confidence;
+        int trackId;
+
+        Detection(float cx, float cy, float w, float h, int classId, float confidence, int trackId) {
+            this.cx = cx;
+            this.cy = cy;
+            this.w = w;
+            this.h = h;
+            this.classId = classId;
+            this.confidence = confidence;
+            this.trackId = trackId;
+        }
+    }
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+
+        Log.i(TAG, "=".repeat(60));
+        Log.i(TAG, "MOT Measurement Starting");
+        Log.i(TAG, "=".repeat(60));
+        Log.i(TAG, "Sequence path: " + SEQUENCE_PATH);
+        Log.i(TAG, "Video FPS: " + VIDEO_FPS);
+        Log.i(TAG, "Track buffer: " + TRACK_BUFFER);
+        Log.i(TAG, "Keyframe interval: " + KEYFRAME_INTERVAL);
+        Log.i(TAG, "Model: " + MODEL_FILE);
+
+        // Run measurement in background thread
+        new Thread(() -> {
+            try {
+                runMeasurement();
+            } catch (Exception e) {
+                Log.e(TAG, "Error during measurement", e);
+            } finally {
+                cleanup();
+                finish();
+            }
+        }).start();
+    }
+
+    private void runMeasurement() {
+        // Load model
+        Log.i(TAG, "");
+        Log.i(TAG, "Loading TFLite model...");
+        if (!loadTFLiteModel(MODEL_FILE)) {
+            Log.e(TAG, "ERROR: Failed to load model");
+            return;
+        }
+        Log.i(TAG, "✓ Model loaded");
+
+        // Initialize tracker
+        Log.i(TAG, "Initializing tracker...");
+        hybridTrackerHandle = nativeInitHybridTracker(VIDEO_FPS, TRACK_BUFFER, KEYFRAME_INTERVAL);
+        if (hybridTrackerHandle == 0) {
+            Log.e(TAG, "ERROR: Failed to initialize tracker");
+            return;
+        }
+        Log.i(TAG, "✓ Tracker initialized (FPS=" + VIDEO_FPS + ")");
+
+        // Get sequence info
+        File seqDir = new File(SEQUENCE_PATH);
+        String sequenceName = seqDir.getName();
+        File imgDir = new File(seqDir, "img1");
+
+        Log.i(TAG, "");
+        Log.i(TAG, "Checking sequence directory...");
+        Log.i(TAG, "Path: " + imgDir.getAbsolutePath());
+
+        if (!imgDir.exists()) {
+            Log.e(TAG, "ERROR: Directory not found: " + imgDir.getAbsolutePath());
+            return;
+        }
+
+        File[] imageFiles = imgDir.listFiles((dir, name) ->
+                name.toLowerCase().endsWith(".jpg") || name.toLowerCase().endsWith(".png"));
+
+        if (imageFiles == null || imageFiles.length == 0) {
+            Log.e(TAG, "ERROR: No images found in directory");
+            return;
+        }
+
+        Arrays.sort(imageFiles, Comparator.comparing(File::getName));
+        Log.i(TAG, "✓ Found " + imageFiles.length + " images");
+
+        // Output file
+        File outputFile = new File(seqDir, sequenceName + "_results.txt");
+        Log.i(TAG, "Output: " + outputFile.getAbsolutePath());
+
+        Log.i(TAG, "");
+        Log.i(TAG, "=".repeat(60));
+        Log.i(TAG, "Starting processing...");
+        Log.i(TAG, "=".repeat(60));
+
+        // Process sequence
+        try (FileWriter writer = new FileWriter(outputFile)) {
+            long startTime = System.currentTimeMillis();
+            int processedFrames = 0;
+            int totalDetections = 0;
+
+            for (int frameIdx = 0; frameIdx < imageFiles.length; frameIdx++) {
+                File imageFile = imageFiles[frameIdx];
+                int frameNumber = frameIdx + 1;
+
+                // Log progress every 100 frames
+                if (frameIdx % 100 == 0 && frameIdx > 0) {
+                    long elapsed = System.currentTimeMillis() - startTime;
+                    float fps = (frameIdx * 1000.0f / elapsed);
+                    int progress = (frameIdx * 100) / imageFiles.length;
+
+                    Log.i(TAG, String.format("Progress: %d%% (%d/%d) - %.1f FPS",
+                            progress, frameNumber, imageFiles.length, fps));
+                }
+
+                // Load frame
+                Bitmap frame = BitmapFactory.decodeFile(imageFile.getAbsolutePath());
+                if (frame == null) {
+                    Log.w(TAG, "WARNING: Failed to load " + imageFile.getName());
+                    continue;
+                }
+
+                // Process frame
+                List<Detection> trackedObjects = processFrame(frame, frameIdx);
+
+                // Write detections
+                for (Detection det : trackedObjects) {
+                    if (det.trackId > 0) {
+                        int imgW = frame.getWidth();
+                        int imgH = frame.getHeight();
+
+                        float centerX = det.cx * imgW;
+                        float centerY = det.cy * imgH;
+                        float width = det.w * imgW;
+                        float height = det.h * imgH;
+
+                        float left = centerX - width / 2f;
+                        float top = centerY - height / 2f;
+
+                        String line = String.format(Locale.US, "%d,%d,%.2f,%.2f,%.2f,%.2f,%.2f,-1,-1,-1\n",
+                                frameNumber,
+                                det.trackId,
+                                left,
+                                top,
+                                width,
+                                height,
+                                det.confidence);
+                        writer.write(line);
+                        totalDetections++;
+                    }
+                }
+
+                frame.recycle();
+                processedFrames++;
+            }
+
+            long endTime = System.currentTimeMillis();
+            float totalSeconds = (endTime - startTime) / 1000f;
+            float fps = processedFrames / totalSeconds;
+
+            Log.i(TAG, "");
+            Log.i(TAG, "=".repeat(60));
+            Log.i(TAG, "MEASUREMENT COMPLETE");
+            Log.i(TAG, "=".repeat(60));
+            Log.i(TAG, "Sequence: " + sequenceName);
+            Log.i(TAG, "Frames: " + processedFrames);
+            Log.i(TAG, "Detections: " + totalDetections);
+            Log.i(TAG, "Time: " + String.format("%.1f", totalSeconds) + "s");
+            Log.i(TAG, "FPS: " + String.format("%.2f", fps));
+            Log.i(TAG, "Output: " + outputFile.getAbsolutePath());
+            Log.i(TAG, "=".repeat(60));
+
+        } catch (IOException e) {
+            Log.e(TAG, "ERROR: Failed to write results", e);
+        }
+    }
+
+    private List<Detection> processFrame(Bitmap frame, int frameIdx) {
+        int originalW = frame.getWidth();
+        int originalH = frame.getHeight();
+
+        boolean isKeyframe = nativeIsKeyframe(hybridTrackerHandle);
+
+        if (isKeyframe) {
+            // Detection + tracking
+            List<Detection> detections = runYOLODetection(frame);
+
+            float[] detectArray = new float[detections.size() * 6];
+            for (int i = 0; i < detections.size(); i++) {
+                Detection d = detections.get(i);
+                detectArray[i * 6] = d.cx;
+                detectArray[i * 6 + 1] = d.cy;
+                detectArray[i * 6 + 2] = d.w;
+                detectArray[i * 6 + 3] = d.h;
+                detectArray[i * 6 + 4] = d.confidence;
+                detectArray[i * 6 + 5] = d.classId;
+            }
+
+            byte[] imageData = bitmapToGrayscale(frame);
+
+            float[] trackerOutput = nativeUpdateWithDetections(
+                    hybridTrackerHandle, detectArray, imageData, originalW, originalH);
+
+            return parseTrackerOutput(trackerOutput);
+
+        } else {
+            // Tracking only
+            byte[] imageData = bitmapToGrayscale(frame);
+
+            float[] trackerOutput = nativeUpdateWithoutDetections(
+                    hybridTrackerHandle, imageData, originalW, originalH);
+
+            return parseTrackerOutput(trackerOutput);
+        }
+    }
+
+    private List<Detection> runYOLODetection(Bitmap originalBitmap) {
+        if (tflite == null || inputShape == null) {
+            return Collections.emptyList();
+        }
+
+        int originalW = originalBitmap.getWidth();
+        int originalH = originalBitmap.getHeight();
+        int modelW = inputShape[2];
+        int modelH = inputShape[1];
+
+        // Letterbox resize
+        float scale = Math.min((float) modelW / originalW, (float) modelH / originalH);
+        int newW = Math.round(originalW * scale);
+        int newH = Math.round(originalH * scale);
+        int padX = (modelW - newW) / 2;
+        int padY = (modelH - newH) / 2;
+
+        Bitmap resized = Bitmap.createScaledBitmap(originalBitmap, newW, newH, true);
+        Bitmap letterbox = Bitmap.createBitmap(modelW, modelH, Bitmap.Config.ARGB_8888);
+        android.graphics.Canvas canvas = new android.graphics.Canvas(letterbox);
+        canvas.drawColor(Color.rgb(114, 114, 114));
+        canvas.drawBitmap(resized, padX, padY, null);
+        resized.recycle();
+
+        // Prepare input buffer
+        ByteBuffer inputBuffer = ByteBuffer.allocateDirect(modelW * modelH * 3 * 4);
+        inputBuffer.order(ByteOrder.nativeOrder());
+
+        int[] pixels = new int[modelW * modelH];
+        letterbox.getPixels(pixels, 0, modelW, 0, 0, modelW, modelH);
+
+        for (int pixel : pixels) {
+            inputBuffer.putFloat(((pixel >> 16) & 0xFF) / 255.0f);
+            inputBuffer.putFloat(((pixel >> 8) & 0xFF) / 255.0f);
+            inputBuffer.putFloat((pixel & 0xFF) / 255.0f);
+        }
+        letterbox.recycle();
+
+        // Run inference
+        Object[] inputs = {inputBuffer};
+        Map<Integer, Object> outputsMap = new HashMap<>();
+
+        if (outputDataTypes[0] == DataType.FLOAT32) {
+            outputsMap.put(0, new float[outputShapes[0][0]][outputShapes[0][1]][outputShapes[0][2]]);
+        } else {
+            outputsMap.put(0, new byte[outputShapes[0][0]][outputShapes[0][1]][outputShapes[0][2]]);
+        }
+
+        tflite.runForMultipleInputsOutputs(inputs, outputsMap);
+
+        return decodeOutput(outputsMap, originalW, originalH, modelW, modelH, padX, padY, scale);
+    }
+
+    private List<Detection> decodeOutput(Map<Integer, Object> outputsMap, int originalW, int originalH,
+                                         int modelW, int modelH, int padX, int padY, float scale) {
+        Tensor outputTensor = tflite.getOutputTensor(0);
+        int[] outShape = outputTensor.shape();
+        DataType outType = outputTensor.dataType();
+
+        int numDetails = outShape[1];
+        int numPredictions = outShape[2];
+
+        if (numDetails < 5) {
+            return Collections.emptyList();
+        }
+
+        // Dequantize output
+        float[][] dequantized = new float[numPredictions][numDetails];
+        if (outType == DataType.FLOAT32) {
+            float[][][] rawFloat = (float[][][]) outputsMap.get(0);
+            for (int i = 0; i < numPredictions; i++) {
+                for (int j = 0; j < numDetails; j++) {
+                    dequantized[i][j] = rawFloat[0][j][i];
+                }
+            }
+        } else {
+            // Quantized model (INT8/UINT8)
+            byte[][][] rawByte = (byte[][][]) outputsMap.get(0);
+            Tensor.QuantizationParams qp = outputTensor.quantizationParams();
+            float scale_q = qp.getScale();
+            int zp = qp.getZeroPoint();
+            boolean isUint8 = (outType == DataType.UINT8);
+
+            for (int i = 0; i < numPredictions; i++) {
+                for (int j = 0; j < numDetails; j++) {
+                    int val = isUint8 ? (rawByte[0][j][i] & 0xFF) : rawByte[0][j][i];
+                    dequantized[i][j] = (val - zp) * scale_q;
+                }
+            }
+        }
+
+        // Extract person detections only (class 0)
+        ArrayList<RectF> boxes = new ArrayList<>();
+        ArrayList<Float> confidences = new ArrayList<>();
+
+        for (int i = 0; i < numPredictions; i++) {
+            float[] row = dequantized[i];
+
+            // Person class score (index 4)
+            float personScore = row[4];
+
+            if (personScore >= CONFIDENCE_THRESHOLD) {
+                float cx = row[0];
+                float cy = row[1];
+                float w_norm = row[2];
+                float h_norm = row[3];
+
+                float pixel_w = w_norm * modelW;
+                float pixel_h = h_norm * modelH;
+                float left = (cx * modelW) - (pixel_w / 2f);
+                float top = (cy * modelH) - (pixel_h / 2f);
+
+                boxes.add(new RectF(left, top, left + pixel_w, top + pixel_h));
+                confidences.add(personScore);
+            }
+        }
+
+        // NMS
+        List<Integer> indices = nonMaxSuppression(boxes, confidences);
+
+        // Map to original coordinates
+        List<Detection> finalDetections = new ArrayList<>();
+        float padXf = (float) padX;
+        float padYf = (float) padY;
+
+        for (int index : indices) {
+            RectF box = boxes.get(index);
+
+            float left_unpadded = box.left - padXf;
+            float top_unpadded = box.top - padYf;
+            float width_unpadded = box.width();
+            float height_unpadded = box.height();
+
+            float left_orig = left_unpadded / scale;
+            float top_orig = top_unpadded / scale;
+            float width_orig = width_unpadded / scale;
+            float height_orig = height_unpadded / scale;
+
+            float left_clipped = Math.max(0f, Math.min(left_orig, originalW));
+            float top_clipped = Math.max(0f, Math.min(top_orig, originalH));
+            float right_clipped = Math.max(0f, Math.min(left_orig + width_orig, originalW));
+            float bottom_clipped = Math.max(0f, Math.min(top_orig + height_orig, originalH));
+            float final_w = right_clipped - left_clipped;
+            float final_h = bottom_clipped - top_clipped;
+
+            float norm_cx = (left_clipped + final_w / 2f) / (float) originalW;
+            float norm_cy = (top_clipped + final_h / 2f) / (float) originalH;
+            float norm_w = final_w / (float) originalW;
+            float norm_h = final_h / (float) originalH;
+
+            if (final_w > 1 && final_h > 1) {
+                finalDetections.add(
+                        new Detection(norm_cx, norm_cy, norm_w, norm_h, 0, confidences.get(index), -1)
+                );
+            }
+        }
+
+        return finalDetections;
+    }
+
+    private static List<Integer> nonMaxSuppression(ArrayList<RectF> boxes, ArrayList<Float> confidences) {
+        List<Integer> selectedIndices = new ArrayList<>();
+        if (boxes.isEmpty()) {
+            return selectedIndices;
+        }
+
+        List<Integer> indices = new ArrayList<>();
+        for (int i = 0; i < confidences.size(); i++) {
+            indices.add(i);
+        }
+        indices.sort((a, b) -> Float.compare(confidences.get(b), confidences.get(a)));
+
+        while (!indices.isEmpty()) {
+            int current_index = indices.get(0);
+            selectedIndices.add(current_index);
+            indices.remove(0);
+
+            RectF current_box = boxes.get(current_index);
+            List<Integer> indices_to_remove = new ArrayList<>();
+
+            for (int i = 0; i < indices.size(); i++) {
+                int comparing_index = indices.get(i);
+                RectF comparing_box = boxes.get(comparing_index);
+
+                float interArea = Math.max(0, Math.min(current_box.right, comparing_box.right) -
+                        Math.max(current_box.left, comparing_box.left)) *
+                        Math.max(0, Math.min(current_box.bottom, comparing_box.bottom) -
+                                Math.max(current_box.top, comparing_box.top));
+                float unionArea = current_box.width() * current_box.height() +
+                        comparing_box.width() * comparing_box.height() - interArea;
+                float iou = (unionArea > 0f) ? (interArea / unionArea) : 0f;
+
+                if (iou > NMS_THRESHOLD) {
+                    indices_to_remove.add(i);
+                }
+            }
+
+            for (int i = indices_to_remove.size() - 1; i >= 0; i--) {
+                indices.remove((int) indices_to_remove.get(i));
+            }
+        }
+
+        return selectedIndices;
+    }
+
+    private List<Detection> parseTrackerOutput(float[] trackerOutput) {
+        List<Detection> result = new ArrayList<>();
+        if (trackerOutput == null || trackerOutput.length == 0) {
+            return result;
+        }
+
+        int numTracks = trackerOutput.length / 7;
+        for (int i = 0; i < numTracks; i++) {
+            float cx = trackerOutput[i * 7];
+            float cy = trackerOutput[i * 7 + 1];
+            float w = trackerOutput[i * 7 + 2];
+            float h = trackerOutput[i * 7 + 3];
+            int trackId = (int) trackerOutput[i * 7 + 4];
+            float conf = trackerOutput[i * 7 + 5];
+            int classId = (int) trackerOutput[i * 7 + 6];
+
+            result.add(new Detection(cx, cy, w, h, classId, conf, trackId));
+        }
+
+        return result;
+    }
+
+    private byte[] bitmapToGrayscale(Bitmap bitmap) {
+        int width = bitmap.getWidth();
+        int height = bitmap.getHeight();
+        byte[] grayscale = new byte[width * height];
+
+        int[] pixels = new int[width * height];
+        bitmap.getPixels(pixels, 0, width, 0, 0, width, height);
+
+        for (int i = 0; i < pixels.length; i++) {
+            int pixel = pixels[i];
+            int r = (pixel >> 16) & 0xFF;
+            int g = (pixel >> 8) & 0xFF;
+            int b = pixel & 0xFF;
+            grayscale[i] = (byte) ((r + g + b) / 3);
+        }
+
+        return grayscale;
+    }
+
+    private boolean loadTFLiteModel(String assetFilename) {
+        try {
+            AssetFileDescriptor afd = getAssets().openFd(assetFilename);
+            FileInputStream fis = new FileInputStream(afd.getFileDescriptor());
+            FileChannel fc = fis.getChannel();
+            MappedByteBuffer mb = fc.map(FileChannel.MapMode.READ_ONLY, afd.getStartOffset(), afd.getLength());
+
+            Interpreter.Options opts = new Interpreter.Options();
+
+            // Check for Pixel TPU (ESSENTIAL - DO NOT REMOVE)
+            String deviceModel = Build.MODEL;
+            String deviceManufacturer = Build.MANUFACTURER;
+            boolean isPixelWithTensor = "Google".equalsIgnoreCase(deviceManufacturer) &&
+                    (deviceModel.startsWith("Pixel 6") || deviceModel.startsWith("Pixel 7") ||
+                            deviceModel.startsWith("Pixel 8") || deviceModel.startsWith("Pixel 9"));
+
+            if (isPixelWithTensor) {
+                try {
+                    NnApiDelegate.Options nnApiOptions = new NnApiDelegate.Options();
+                    nnApiOptions.setExecutionPreference(NnApiDelegate.Options.EXECUTION_PREFERENCE_SUSTAINED_SPEED);
+                    nnApiOptions.setAllowFp16(true);
+                    nnApiOptions.setUseNnapiCpu(false);
+
+                    nnApiDelegate = new NnApiDelegate(nnApiOptions);
+                    opts.addDelegate(nnApiDelegate);
+
+                    Log.i(TAG, "✓ NNAPI/TPU delegate enabled (ESSENTIAL)");
+                } catch (Exception e) {
+                    Log.w(TAG, "⚠ TPU initialization failed, falling back to CPU", e);
+                }
+            } else {
+                Log.i(TAG, "Device: " + deviceManufacturer + " " + deviceModel + " (CPU only)");
+            }
+
+            opts.setNumThreads(4);
+            opts.setUseXNNPACK(true);
+
+            tflite = new Interpreter(mb, opts);
+
+            Tensor inTensor = tflite.getInputTensor(0);
+            inputShape = inTensor.shape();
+            inputDataType = inTensor.dataType();
+
+            outputCount = tflite.getOutputTensorCount();
+            outputShapes = new int[outputCount][];
+            outputDataTypes = new DataType[outputCount];
+            for (int i = 0; i < outputCount; i++) {
+                Tensor t = tflite.getOutputTensor(i);
+                outputShapes[i] = t.shape();
+                outputDataTypes[i] = t.dataType();
+            }
+
+            Log.i(TAG, "Input shape: " + Arrays.toString(inputShape));
+            Log.i(TAG, "Input dtype: " + inputDataType.name());
+            Log.i(TAG, "Output shape: " + Arrays.toString(outputShapes[0]));
+            Log.i(TAG, "Output dtype: " + outputDataTypes[0].name());
+
+            return true;
+
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to load model", e);
+            return false;
+        }
+    }
+
+    private void cleanup() {
+        Log.i(TAG, "");
+        Log.i(TAG, "Cleaning up...");
+
+        if (hybridTrackerHandle != 0) {
+            nativeReleaseHybridTracker(hybridTrackerHandle);
+            hybridTrackerHandle = 0;
+        }
+
+        if (tflite != null) {
+            tflite.close();
+            tflite = null;
+        }
+
+        if (nnApiDelegate != null) {
+            nnApiDelegate.close();
+            nnApiDelegate = null;
+        }
+
+        Log.i(TAG, "✓ Cleanup complete");
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        cleanup();
+    }
+}

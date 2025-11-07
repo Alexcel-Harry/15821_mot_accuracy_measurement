@@ -1,0 +1,7 @@
+<resources>
+    <string name="app_name">Edge Mode</string>
+    <string name="annotation_view_description">NEED TO MODIFY ANNOTATION VIEW DESCRIPTION</string>
+    <string name="message_from_server">Message from server</string>
+    <string name="server_reply">Text replied</string>
+
+</resources>

@@ -1,0 +1,4 @@
+/home/yihaosun/Android/Sdk/cmake/3.22.1/bin/ninja \
+  -C \
+  /home/yihaosun/Desktop/YihaoSun/15821/15821p5_client/app/.cxx/Debug/4ww1c15b/arm64-v8a \
+  bytetrack_jni

@@ -1,0 +1,44 @@
+[33m08addba[m[33m ([m[1;36mHEAD -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m)[m HEAD@{0}: commit: MOT version 1 (local + edge mdoe)
+[33m4562ab2[m HEAD@{1}: checkout: moving from c0941aa52a1095e24f08f322f0ba951409790bb6 to main
+[33mc0941aa[m HEAD@{2}: commit: MOT version 1 (local + edge mdoe)
+[33m4562ab2[m HEAD@{3}: checkout: moving from main to 4562ab2e91377a13f0dc2c28cf3b7fab62c5ed44
+[33m4562ab2[m HEAD@{4}: checkout: moving from measurement to main
+[33md5b32b6[m[33m ([m[1;31morigin/measurement[m[33m, [m[1;32mmeasurement[m[33m)[m HEAD@{5}: commit: object detection edge mode final measurement app
+[33m1abe8f1[m HEAD@{6}: checkout: moving from 1abe8f18fbc46ea0a8f6d47ad3ba1e599287fc27 to measurement
+[33m1abe8f1[m HEAD@{7}: checkout: moving from measurement to 1abe8f18fbc46ea0a8f6d47ad3ba1e599287fc27
+[33m1abe8f1[m HEAD@{8}: checkout: moving from main to measurement
+[33m4562ab2[m HEAD@{9}: commit: mixed mode edge mode and local mode
+[33m84a9ea9[m HEAD@{10}: checkout: moving from ea525a6aa3c9a56dfec8420df0b6e096b2d31bc0 to main
+[33mea525a6[m HEAD@{11}: commit: mixed mode edge mode and local mode
+[33m84a9ea9[m HEAD@{12}: checkout: moving from 2e7dfa2f91ab8fbe81cfdcb282dc8f3072f13d2e to 84a9ea99d592dac3041d4cbcd2aa6b1f6dda45cc
+[33m2e7dfa2[m HEAD@{13}: checkout: moving from 84a9ea99d592dac3041d4cbcd2aa6b1f6dda45cc to 2e7dfa2f91ab8fbe81cfdcb282dc8f3072f13d2e
+[33m84a9ea9[m HEAD@{14}: checkout: moving from main to 84a9ea99d592dac3041d4cbcd2aa6b1f6dda45cc
+[33m84a9ea9[m HEAD@{15}: checkout: moving from measurement to main
+[33m1abe8f1[m HEAD@{16}: commit: object detection latency and accuracy benchmark
+[33m440d42a[m HEAD@{17}: checkout: moving from 308855b3c7ae368b300d03efbbabb60001b450ee to measurement
+[33m308855b[m HEAD@{18}: commit: object detection latency and accuracy benchmark
+[33m440d42a[m HEAD@{19}: checkout: moving from 2e7dfa2f91ab8fbe81cfdcb282dc8f3072f13d2e to 440d42ade3b7f57470d96cd0b5791d9f7acd4a32
+[33m2e7dfa2[m HEAD@{20}: checkout: moving from measurement to 2e7dfa2f91ab8fbe81cfdcb282dc8f3072f13d2e
+[33m440d42a[m HEAD@{21}: commit: edge measurement app (combining accuracy and performance measurement)
+[33m80adc57[m HEAD@{22}: checkout: moving from 80adc57c85e80b66ef5970a14dcf41f6e2d4cf88 to measurement
+[33m80adc57[m HEAD@{23}: checkout: moving from 5380056ffaa6d20eb6b6cde092c7b507e1e5b505 to 80adc57c85e80b66ef5970a14dcf41f6e2d4cf88
+[33m5380056[m HEAD@{24}: checkout: moving from 84a9ea99d592dac3041d4cbcd2aa6b1f6dda45cc to 5380056ffaa6d20eb6b6cde092c7b507e1e5b505
+[33m84a9ea9[m HEAD@{25}: checkout: moving from measurement to 84a9ea99d592dac3041d4cbcd2aa6b1f6dda45cc
+[33m80adc57[m HEAD@{26}: checkout: moving from 80adc57c85e80b66ef5970a14dcf41f6e2d4cf88 to measurement
+[33m80adc57[m HEAD@{27}: commit: edge mode performance measurements
+[33mb2ab075[m HEAD@{28}: checkout: moving from main to b2ab075b7eff79de6fa4c6da4e99fd48aa00d93f
+[33m84a9ea9[m HEAD@{29}: commit: local mode horizontal version——2
+[33m5380056[m HEAD@{30}: commit: local mode horizontal version
+[33m682bb59[m HEAD@{31}: pull: Fast-forward
+[33m56c8f6a[m HEAD@{32}: commit: local mode - tps + latency + slightly optimmimzed latency correct version
+[33m9e866ee[m HEAD@{33}: commit: local mode - tps + latency + slightly optimmimzed latency
+[33m89136b9[m HEAD@{34}: commit: local + edge mode
+[33m8111c73[m HEAD@{35}: pull: Fast-forward
+[33ma044240[m HEAD@{36}: commit: local mode cpu-based version 1
+[33m8935438[m HEAD@{37}: commit: local mode draft 0.0
+[33m2e7dfa2[m HEAD@{38}: commit: offload map + bounding box
+[33mb2ab075[m HEAD@{39}: commit: offload map with bounding box transmission
+[33m8a29a5c[m HEAD@{40}: commit: edge client 1.0
+[33m83240b5[m HEAD@{41}: Branch: renamed refs/heads/master to refs/heads/main
+[33m83240b5[m HEAD@{43}: commit (amend): android echo client
+[33m98f4b51[m HEAD@{44}: commit (initial): echo server

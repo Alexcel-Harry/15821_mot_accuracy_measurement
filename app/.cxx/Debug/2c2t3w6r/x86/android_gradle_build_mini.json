@@ -1,0 +1,27 @@
+{
+  "buildFiles": [
+    "/home/yihaosun/Desktop/YihaoSun/15821/15821_mot_accuracy_measurement/app/src/main/cpp/CMakeLists.txt"
+  ],
+  "cleanCommandsComponents": [
+    [
+      "/home/yihaosun/Android/Sdk/cmake/3.22.1/bin/ninja",
+      "-C",
+      "/home/yihaosun/Desktop/YihaoSun/15821/15821_mot_accuracy_measurement/app/.cxx/Debug/2c2t3w6r/x86",
+      "clean"
+    ]
+  ],
+  "buildTargetsCommandComponents": [
+    "/home/yihaosun/Android/Sdk/cmake/3.22.1/bin/ninja",
+    "-C",
+    "/home/yihaosun/Desktop/YihaoSun/15821/15821_mot_accuracy_measurement/app/.cxx/Debug/2c2t3w6r/x86",
+    "{LIST_OF_TARGETS_TO_BUILD}"
+  ],
+  "libraries": {
+    "bytetrack_jni::@6890427a1f51a3e7e1df": {
+      "artifactName": "bytetrack_jni",
+      "abi": "x86",
+      "output": "/home/yihaosun/Desktop/YihaoSun/15821/15821_mot_accuracy_measurement/app/build/intermediates/cxx/Debug/2c2t3w6r/obj/x86/libbytetrack_jni.so",
+      "runtimeFiles": []
+    }
+  }
+}
