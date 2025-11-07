@@ -4,6 +4,23 @@
             "outputFile": "edu.cmu.cs.face.app-mergeDebugResources-34:/values/values.xml",
             "map": [
                 {
+                    "source": "/home/yihaosun/Desktop/YihaoSun/15821/15821_mot_accuracy_measurement/app/src/main/res/values/colors.xml",
+                    "from": {
+                        "startLines": "7,2,3,4,5,6,8",
+                        "startColumns": "4,4,4,4,4,4,4",
+                        "startOffsets": "286,55,102,149,196,241,328",
+                        "endColumns": "41,46,46,46,44,44,41",
+                        "endOffsets": "323,97,144,191,236,281,365"
+                    },
+                    "to": {
+                        "startLines": "572,879,880,881,892,893,896",
+                        "startColumns": "4,4,4,4,4,4,4",
+                        "startOffsets": "29605,52463,52510,52557,53301,53346,53512",
+                        "endColumns": "41,46,46,46,44,44,41",
+                        "endOffsets": "29642,52505,52552,52599,53341,53386,53549"
+                    }
+                },
+                {
                     "source": "/home/yihaosun/.gradle/caches/transforms-3/4fb3b478c2d2ff82d51d7e00709a63d2/transformed/jetified-savedstate-1.2.1/res/values/values.xml",
                     "from": {
                         "startLines": "2",
@@ -186,6 +203,23 @@
                     }
                 },
                 {
+                    "source": "/home/yihaosun/Desktop/YihaoSun/15821/15821_mot_accuracy_measurement/app/src/main/res/values/strings.xml",
+                    "from": {
+                        "startLines": "2,1,3,4",
+                        "startColumns": "4,4,4,4",
+                        "startOffsets": "63,16,162,230",
+                        "endColumns": "98,46,67,53",
+                        "endOffsets": "157,58,225,279"
+                    },
+                    "to": {
+                        "startLines": "1904,1905,1972,2052",
+                        "startColumns": "4,4,4,4",
+                        "startOffsets": "127373,127472,135689,147584",
+                        "endColumns": "98,46,67,53",
+                        "endOffsets": "127467,127514,135752,147633"
+                    }
+                },
+                {
                     "source": "/home/yihaosun/.gradle/caches/transforms-3/eabc05511ec58de02dbed12c0c597eef/transformed/cardview-1.0.0/res/values/values.xml",
                     "from": {
                         "startLines": "2,3,4,5,6,35,36,37,38,45,47,50,7",
@@ -279,37 +313,22 @@
                     }
                 },
                 {
-                    "source": "/home/yihaosun/Desktop/YihaoSun/15821/15821p5_client/app/src/main/res/values/strings.xml",
+                    "source": "/home/yihaosun/Desktop/YihaoSun/15821/15821_mot_accuracy_measurement/app/src/main/res/values/themes.xml",
                     "from": {
-                        "startLines": "2,1,3,4",
-                        "startColumns": "4,4,4,4",
-                        "startOffsets": "63,16,162,230",
-                        "endColumns": "98,46,67,53",
-                        "endOffsets": "157,58,225,279"
+                        "startLines": "2",
+                        "startColumns": "4",
+                        "startOffsets": "100",
+                        "endLines": "14",
+                        "endColumns": "12",
+                        "endOffsets": "811"
                     },
                     "to": {
-                        "startLines": "1904,1905,1972,2052",
-                        "startColumns": "4,4,4,4",
-                        "startOffsets": "127373,127472,135689,147584",
-                        "endColumns": "98,46,67,53",
-                        "endOffsets": "127467,127514,135752,147633"
-                    }
-                },
-                {
-                    "source": "/home/yihaosun/Desktop/YihaoSun/15821/15821p5_client/app/src/main/res/values/colors.xml",
-                    "from": {
-                        "startLines": "7,2,3,4,5,6,8",
-                        "startColumns": "4,4,4,4,4,4,4",
-                        "startOffsets": "286,55,102,149,196,241,328",
-                        "endColumns": "41,46,46,46,44,44,41",
-                        "endOffsets": "323,97,144,191,236,281,365"
-                    },
-                    "to": {
-                        "startLines": "572,879,880,881,892,893,896",
-                        "startColumns": "4,4,4,4,4,4,4",
-                        "startOffsets": "29605,52463,52510,52557,53301,53346,53512",
-                        "endColumns": "41,46,46,46,44,44,41",
-                        "endOffsets": "29642,52505,52552,52599,53341,53386,53549"
+                        "startLines": "6316",
+                        "startColumns": "4",
+                        "startOffsets": "443464",
+                        "endLines": "6328",
+                        "endColumns": "12",
+                        "endOffsets": "444052"
                     }
                 },
                 {
@@ -346,25 +365,6 @@
                         "startOffsets": "120474",
                         "endColumns": "49",
                         "endOffsets": "120519"
-                    }
-                },
-                {
-                    "source": "/home/yihaosun/Desktop/YihaoSun/15821/15821p5_client/app/src/main/res/values/themes.xml",
-                    "from": {
-                        "startLines": "2",
-                        "startColumns": "4",
-                        "startOffsets": "100",
-                        "endLines": "14",
-                        "endColumns": "12",
-                        "endOffsets": "811"
-                    },
-                    "to": {
-                        "startLines": "6316",
-                        "startColumns": "4",
-                        "startOffsets": "443464",
-                        "endLines": "6328",
-                        "endColumns": "12",
-                        "endOffsets": "444052"
                     }
                 },
                 {

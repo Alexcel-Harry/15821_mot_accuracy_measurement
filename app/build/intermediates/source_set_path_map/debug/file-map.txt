@@ -30,10 +30,10 @@ edu.cmu.cs.face.app-lifecycle-runtime-2.6.1-28 /home/yihaosun/.gradle/caches/tra
 edu.cmu.cs.face.app-jetified-startup-runtime-1.1.1-29 /home/yihaosun/.gradle/caches/transforms-3/f7c41787c5356d97480904f67ed0b810/transformed/jetified-startup-runtime-1.1.1/res
 edu.cmu.cs.face.app-core-1.12.0-30 /home/yihaosun/.gradle/caches/transforms-3/fab4f35a28a0e4795081a0dd9120c083/transformed/core-1.12.0/res
 edu.cmu.cs.face.app-lifecycle-viewmodel-2.6.1-31 /home/yihaosun/.gradle/caches/transforms-3/feb08cd6498e1a2a41901898b91b5ae2/transformed/lifecycle-viewmodel-2.6.1/res
-edu.cmu.cs.face.app-pngs-32 /home/yihaosun/Desktop/YihaoSun/15821/15821p5_client/app/build/generated/res/pngs/debug
-edu.cmu.cs.face.app-resValues-33 /home/yihaosun/Desktop/YihaoSun/15821/15821p5_client/app/build/generated/res/resValues/debug
-edu.cmu.cs.face.app-packageDebugResources-34 /home/yihaosun/Desktop/YihaoSun/15821/15821p5_client/app/build/intermediates/incremental/debug/packageDebugResources/merged.dir
-edu.cmu.cs.face.app-packageDebugResources-35 /home/yihaosun/Desktop/YihaoSun/15821/15821p5_client/app/build/intermediates/incremental/debug/packageDebugResources/stripped.dir
-edu.cmu.cs.face.app-merged_res-36 /home/yihaosun/Desktop/YihaoSun/15821/15821p5_client/app/build/intermediates/merged_res/debug
-edu.cmu.cs.face.app-debug-37 /home/yihaosun/Desktop/YihaoSun/15821/15821p5_client/app/src/debug/res
-edu.cmu.cs.face.app-main-38 /home/yihaosun/Desktop/YihaoSun/15821/15821p5_client/app/src/main/res
+edu.cmu.cs.face.app-pngs-32 /home/yihaosun/Desktop/YihaoSun/15821/15821_mot_accuracy_measurement/app/build/generated/res/pngs/debug
+edu.cmu.cs.face.app-resValues-33 /home/yihaosun/Desktop/YihaoSun/15821/15821_mot_accuracy_measurement/app/build/generated/res/resValues/debug
+edu.cmu.cs.face.app-packageDebugResources-34 /home/yihaosun/Desktop/YihaoSun/15821/15821_mot_accuracy_measurement/app/build/intermediates/incremental/debug/packageDebugResources/merged.dir
+edu.cmu.cs.face.app-packageDebugResources-35 /home/yihaosun/Desktop/YihaoSun/15821/15821_mot_accuracy_measurement/app/build/intermediates/incremental/debug/packageDebugResources/stripped.dir
+edu.cmu.cs.face.app-merged_res-36 /home/yihaosun/Desktop/YihaoSun/15821/15821_mot_accuracy_measurement/app/build/intermediates/merged_res/debug
+edu.cmu.cs.face.app-debug-37 /home/yihaosun/Desktop/YihaoSun/15821/15821_mot_accuracy_measurement/app/src/debug/res
+edu.cmu.cs.face.app-main-38 /home/yihaosun/Desktop/YihaoSun/15821/15821_mot_accuracy_measurement/app/src/main/res
