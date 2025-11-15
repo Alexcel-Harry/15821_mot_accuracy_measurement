@@ -111,7 +111,7 @@ public class MainActivity extends AppCompatActivity {
     // ============================================================================
 
     // Model file name
-    private static final String MODEL_FILE = "yolo11s_full_integer_quant.tflite";
+    private static final String MODEL_FILE = "yolo11n_full_integer_quant.tflite";
 
     // TFLite interpreter
     private Interpreter tflite = null;
@@ -124,6 +124,10 @@ public class MainActivity extends AppCompatActivity {
 
     // Tracker
     private long hybridTrackerHandle = 0;
+
+    // Latency measurement
+    private long[] latencyMeasurements = new long[600];
+    private int latencyIndex = 0;
 
     // Native methods
     public native long nativeInitHybridTracker(int frameRate, int trackBuffer, int keyframeInterval);
@@ -233,11 +237,15 @@ public class MainActivity extends AppCompatActivity {
         Arrays.sort(imageFiles, Comparator.comparing(File::getName));
         Log.i(TAG, "✓ Found " + imageFiles.length + " images");
 
-        // Output file
+        // Limit to 600 frames for latency measurement
+        int framesToProcess = Math.min(imageFiles.length, 600);
+        Log.i(TAG, "Processing " + framesToProcess + " frames for latency measurement");
+
+        // Output file for latency measurements
         File appSpecificDir = getExternalFilesDir(null);
-        File outputFile = new File(appSpecificDir, sequenceName + "_results.txt");
+        File outputFile = new File(appSpecificDir, sequenceName + "_latency.csv");
         // This will save the file to a path like:
-        // /sdcard/Android/data/edu.cmu.cs.face/files/MOT17-02-DPM_results.txt
+        // /sdcard/Android/data/edu.cmu.cs.face/files/MOT17-02-DPM_latency.csv
 
         Log.i(TAG, "Output: " + outputFile.getAbsolutePath());
 
@@ -246,87 +254,66 @@ public class MainActivity extends AppCompatActivity {
         Log.i(TAG, "Starting processing...");
         Log.i(TAG, "=".repeat(60));
 
-        // Process sequence
-        try (FileWriter writer = new FileWriter(outputFile)) {
-            long startTime = System.currentTimeMillis();
-            int processedFrames = 0;
-            int totalDetections = 0;
+        // Process sequence and measure latency
+        long overallStartTime = System.currentTimeMillis();
+        int processedFrames = 0;
 
-            for (int frameIdx = 0; frameIdx < imageFiles.length; frameIdx++) {
-                File imageFile = imageFiles[frameIdx];
-                int frameNumber = frameIdx + 1;
+        for (int frameIdx = 0; frameIdx < framesToProcess; frameIdx++) {
+            File imageFile = imageFiles[frameIdx];
+            int frameNumber = frameIdx + 1;
 
-                // Log progress every 100 frames
-                if (frameIdx % 100 == 0 && frameIdx > 0) {
-                    long elapsed = System.currentTimeMillis() - startTime;
-                    float fps = (frameIdx * 1000.0f / elapsed);
-                    int progress = (frameIdx * 100) / imageFiles.length;
+            // Log progress every 100 frames
+            if (frameIdx % 100 == 0 && frameIdx > 0) {
+                long elapsed = System.currentTimeMillis() - overallStartTime;
+                float fps = (frameIdx * 1000.0f / elapsed);
+                int progress = (frameIdx * 100) / framesToProcess;
 
-                    Log.i(TAG, String.format("Progress: %d%% (%d/%d) - %.1f FPS",
-                            progress, frameNumber, imageFiles.length, fps));
-                }
-
-                // Load frame
-                Bitmap frame = BitmapFactory.decodeFile(imageFile.getAbsolutePath());
-                if (frame == null) {
-                    Log.w(TAG, "WARNING: Failed to load " + imageFile.getName());
-                    continue;
-                }
-
-                // Process frame
-                List<Detection> trackedObjects = processFrame(frame, frameIdx);
-
-                // Write detections
-                for (Detection det : trackedObjects) {
-                    // Filter for person (classId == 0) HERE, after tracking
-                    if (det.trackId > 0 && det.classId == 0) {
-                        int imgW = frame.getWidth();
-                        int imgH = frame.getHeight();
-
-                        float centerX = det.cx * imgW;
-                        float centerY = det.cy * imgH;
-                        float width = det.w * imgW;
-                        float height = det.h * imgH;
-
-                        float left = centerX - width / 2f;
-                        float top = centerY - height / 2f;
-
-                        String line = String.format(Locale.US, "%d,%d,%.2f,%.2f,%.2f,%.2f,%.2f,-1,-1,-1\n",
-                                frameNumber,
-                                det.trackId,
-                                left,
-                                top,
-                                width,
-                                height,
-                                det.confidence);
-                        writer.write(line);
-                        totalDetections++;
-                    }
-                }
-
-                frame.recycle();
-                processedFrames++;
+                Log.i(TAG, String.format("Progress: %d%% (%d/%d) - %.1f FPS",
+                        progress, frameNumber, framesToProcess, fps));
             }
 
-            long endTime = System.currentTimeMillis();
-            float totalSeconds = (endTime - startTime) / 1000f;
-            float fps = processedFrames / totalSeconds;
+            // Load frame
+            Bitmap frame = BitmapFactory.decodeFile(imageFile.getAbsolutePath());
+            if (frame == null) {
+                Log.w(TAG, "WARNING: Failed to load " + imageFile.getName());
+                continue;
+            }
 
-            Log.i(TAG, "");
-            Log.i(TAG, "=".repeat(60));
-            Log.i(TAG, "MEASUREMENT COMPLETE");
-            Log.i(TAG, "=".repeat(60));
-            Log.i(TAG, "Sequence: " + sequenceName);
-            Log.i(TAG, "Frames: " + processedFrames);
-            Log.i(TAG, "Detections: " + totalDetections);
-            Log.i(TAG, "Time: " + String.format("%.1f", totalSeconds) + "s");
-            Log.i(TAG, "FPS: " + String.format("%.2f", fps));
-            Log.i(TAG, "Output: " + outputFile.getAbsolutePath());
-            Log.i(TAG, "=".repeat(60));
+            // Measure end-to-end latency: preprocessing + inference + tracking
+            long frameStartTime = System.nanoTime();
+            processFrame(frame, frameIdx);
+            long frameEndTime = System.nanoTime();
 
-        } catch (IOException e) {
-            Log.e(TAG, "ERROR: Failed to write results", e);
+            // Store latency in milliseconds
+            latencyMeasurements[latencyIndex++] = (frameEndTime - frameStartTime) / 1000000;
+
+            frame.recycle();
+            processedFrames++;
         }
+
+        long overallEndTime = System.currentTimeMillis();
+        float totalSeconds = (overallEndTime - overallStartTime) / 1000f;
+        float fps = processedFrames / totalSeconds;
+
+        // Write latency measurements to CSV (no header, just values in ms)
+        try (FileWriter writer = new FileWriter(outputFile)) {
+            for (int i = 0; i < latencyIndex; i++) {
+                writer.write(latencyMeasurements[i] + "\n");
+            }
+        } catch (IOException e) {
+            Log.e(TAG, "ERROR: Failed to write latency results", e);
+        }
+
+        Log.i(TAG, "");
+        Log.i(TAG, "=".repeat(60));
+        Log.i(TAG, "LATENCY MEASUREMENT COMPLETE");
+        Log.i(TAG, "=".repeat(60));
+        Log.i(TAG, "Sequence: " + sequenceName);
+        Log.i(TAG, "Frames: " + processedFrames);
+        Log.i(TAG, "Time: " + String.format("%.1f", totalSeconds) + "s");
+        Log.i(TAG, "FPS: " + String.format("%.2f", fps));
+        Log.i(TAG, "Output: " + outputFile.getAbsolutePath());
+        Log.i(TAG, "=".repeat(60));
     }
 
     private List<Detection> processFrame(Bitmap frame, int frameIdx) {
