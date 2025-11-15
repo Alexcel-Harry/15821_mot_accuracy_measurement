@@ -94,7 +94,7 @@ public class MainActivity extends AppCompatActivity {
      * Keyframe interval (run YOLO every N frames)
      * Higher = faster, Lower = more accurate
      */
-    private static final int KEYFRAME_INTERVAL = 1;
+    private static final int KEYFRAME_INTERVAL = 6;
 
     /**
      * Detection confidence threshold
@@ -111,7 +111,7 @@ public class MainActivity extends AppCompatActivity {
     // ============================================================================
 
     // Model file name
-    private static final String MODEL_FILE = "yolo11n_full_integer_quant.tflite";
+    private static final String MODEL_FILE = "yolo11s_full_integer_quant.tflite";
 
     // TFLite interpreter
     private Interpreter tflite = null;
@@ -125,9 +125,13 @@ public class MainActivity extends AppCompatActivity {
     // Tracker
     private long hybridTrackerHandle = 0;
 
-    // Latency measurement
-    private long[] latencyMeasurements = new long[600];
-    private int latencyIndex = 0;
+    // --- Global latency accumulators (in nanoseconds) ---
+    private long totalPreprocessingTimeNs = 0;
+    private long totalInferenceTimeNs = 0;
+    private long totalPostprocessingTimeNs = 0;
+    private long totalTrackingTimeNs = 0; // ByteTrack update
+    private long totalOpticalFlowTimeNs = 0; // Optical Flow update
+
 
     // Native methods
     public native long nativeInitHybridTracker(int frameRate, int trackBuffer, int keyframeInterval);
@@ -241,11 +245,11 @@ public class MainActivity extends AppCompatActivity {
         int framesToProcess = Math.min(imageFiles.length, 600);
         Log.i(TAG, "Processing " + framesToProcess + " frames for latency measurement");
 
-        // Output file for latency measurements
+        // Output file for amortized latency measurements
         File appSpecificDir = getExternalFilesDir(null);
-        File outputFile = new File(appSpecificDir, sequenceName + "_latency.csv");
+        File outputFile = new File(appSpecificDir, sequenceName + "_amortized_latency.csv");
         // This will save the file to a path like:
-        // /sdcard/Android/data/edu.cmu.cs.face/files/MOT17-02-DPM_latency.csv
+        // /sdcard/Android/data/edu.cmu.cs.face/files/MOT17-02-DPM_amortized_latency.csv
 
         Log.i(TAG, "Output: " + outputFile.getAbsolutePath());
 
@@ -279,13 +283,8 @@ public class MainActivity extends AppCompatActivity {
                 continue;
             }
 
-            // Measure end-to-end latency: preprocessing + inference + tracking
-            long frameStartTime = System.nanoTime();
+            // Timing is now handled *inside* processFrame and runYOLODetection
             processFrame(frame, frameIdx);
-            long frameEndTime = System.nanoTime();
-
-            // Store latency in milliseconds
-            latencyMeasurements[latencyIndex++] = (frameEndTime - frameStartTime) / 1000000;
 
             frame.recycle();
             processedFrames++;
@@ -293,16 +292,41 @@ public class MainActivity extends AppCompatActivity {
 
         long overallEndTime = System.currentTimeMillis();
         float totalSeconds = (overallEndTime - overallStartTime) / 1000f;
-        float fps = processedFrames / totalSeconds;
+        float fps = (processedFrames > 0) ? (processedFrames / totalSeconds) : 0;
 
-        // Write latency measurements to CSV (no header, just values in ms)
-        try (FileWriter writer = new FileWriter(outputFile)) {
-            for (int i = 0; i < latencyIndex; i++) {
-                writer.write(latencyMeasurements[i] + "\n");
-            }
-        } catch (IOException e) {
-            Log.e(TAG, "ERROR: Failed to write latency results", e);
+        // --- [MODIFIED] Calculate amortized averages AND totals ---
+        double avgPrepMs = 0, avgInferenceMs = 0, avgPostMs = 0, avgTrackMs = 0, avgOpticalFlowMs = 0;
+
+        if (processedFrames > 0) {
+            avgPrepMs = (totalPreprocessingTimeNs / (double) processedFrames) / 1_000_000.0;
+            avgInferenceMs = (totalInferenceTimeNs / (double) processedFrames) / 1_000_000.0;
+            avgPostMs = (totalPostprocessingTimeNs / (double) processedFrames) / 1_000_000.0;
+            avgTrackMs = (totalTrackingTimeNs / (double) processedFrames) / 1_000_000.0;
+            avgOpticalFlowMs = (totalOpticalFlowTimeNs / (double) processedFrames) / 1_000_000.0;
         }
+
+        // Calculate totals in milliseconds
+        double totalPrepMs = totalPreprocessingTimeNs / 1_000_000.0;
+        double totalInferenceMs = totalInferenceTimeNs / 1_000_000.0;
+        double totalPostMs = totalPostprocessingTimeNs / 1_000_000.0;
+        double totalTrackMs = totalTrackingTimeNs / 1_000_000.0;
+        double totalOpticalFlowMs = totalOpticalFlowTimeNs / 1_000_000.0;
+
+
+        try (FileWriter writer = new FileWriter(outputFile)) {
+            // Row 1: Amortized Averages (ms) + Total Time (s)
+            writer.write(String.format(Locale.US, "%.4f,%.4f,%.4f,%.4f,%.4f\n",
+                    avgPrepMs, avgInferenceMs, avgPostMs, avgTrackMs, avgOpticalFlowMs));
+
+//            // Row 2: Total Stage Times (ms)
+//            writer.write(String.format(Locale.US, "%.4f,%.4f,%.4f,%.4f,%.4f\n",
+//                    totalPrepMs, totalInferenceMs, totalPostMs, totalTrackMs, totalOpticalFlowMs));
+
+        } catch (IOException e) {
+            Log.e(TAG, "ERROR: Failed to write amortized latency results", e);
+        }
+        // --- [END MODIFIED] ---
+
 
         Log.i(TAG, "");
         Log.i(TAG, "=".repeat(60));
@@ -310,10 +334,27 @@ public class MainActivity extends AppCompatActivity {
         Log.i(TAG, "=".repeat(60));
         Log.i(TAG, "Sequence: " + sequenceName);
         Log.i(TAG, "Frames: " + processedFrames);
-        Log.i(TAG, "Time: " + String.format("%.1f", totalSeconds) + "s");
-        Log.i(TAG, "FPS: " + String.format("%.2f", fps));
+        Log.i(TAG, "Time: " + String.format(Locale.US, "%.1f", totalSeconds) + "s");
+        Log.i(TAG, "FPS: " + String.format(Locale.US, "%.2f", fps));
         Log.i(TAG, "Output: " + outputFile.getAbsolutePath());
         Log.i(TAG, "=".repeat(60));
+
+        // --- [MODIFIED] Log amortized AND total results ---
+        Log.i(TAG, "Amortized Averages (ms):");
+        Log.i(TAG, String.format(Locale.US, "  Preprocessing: %.4f ms", avgPrepMs));
+        Log.i(TAG, String.format(Locale.US, "  Inference:     %.4f ms", avgInferenceMs));
+        Log.i(TAG, String.format(Locale.US, "  Postprocessing:%.4f ms", avgPostMs));
+        Log.i(TAG, String.format(Locale.US, "  Tracking:      %.4f ms", avgTrackMs));
+        Log.i(TAG, String.format(Locale.US, "  Optical Flow:  %.4f ms", avgOpticalFlowMs));
+        Log.i(TAG, "=".repeat(60));
+        Log.i(TAG, "Total Stage Times (ms):");
+        Log.i(TAG, String.format(Locale.US, "  Total Preprocessing: %.2f ms", totalPrepMs));
+        Log.i(TAG, String.format(Locale.US, "  Total Inference:     %.2f ms", totalInferenceMs));
+        Log.i(TAG, String.format(Locale.US, "  Total Postprocessing:%.2f ms", totalPostMs));
+        Log.i(TAG, String.format(Locale.US, "  Total Tracking:      %.2f ms", totalTrackMs));
+        Log.i(TAG, String.format(Locale.US, "  Total Optical Flow:  %.2f ms", totalOpticalFlowMs));
+        Log.i(TAG, "=".repeat(60));
+        // --- [END MODIFIED] ---
     }
 
     private List<Detection> processFrame(Bitmap frame, int frameIdx) {
@@ -324,6 +365,8 @@ public class MainActivity extends AppCompatActivity {
 
         if (isKeyframe) {
             // Detection + tracking
+            // Preprocessing, Inference, and Postprocessing
+            // timing is now handled *inside* runYOLODetection()
             List<Detection> detections = runYOLODetection(frame);
 
             float[] detectArray = new float[detections.size() * 6];
@@ -339,8 +382,11 @@ public class MainActivity extends AppCompatActivity {
 
             byte[] imageData = bitmapToGrayscale(frame);
 
+            // Time the tracking update
+            long trackStartTime = System.nanoTime();
             float[] trackerOutput = nativeUpdateWithDetections(
                     hybridTrackerHandle, detectArray, imageData, originalW, originalH);
+            totalTrackingTimeNs += (System.nanoTime() - trackStartTime);
 
             return parseTrackerOutput(trackerOutput);
 
@@ -348,8 +394,11 @@ public class MainActivity extends AppCompatActivity {
             // Tracking only
             byte[] imageData = bitmapToGrayscale(frame);
 
+            // Time the optical flow update
+            long ofStartTime = System.nanoTime();
             float[] trackerOutput = nativeUpdateWithoutDetections(
                     hybridTrackerHandle, imageData, originalW, originalH);
+            totalOpticalFlowTimeNs += (System.nanoTime() - ofStartTime);
 
             return parseTrackerOutput(trackerOutput);
         }
@@ -359,6 +408,9 @@ public class MainActivity extends AppCompatActivity {
         if (tflite == null || inputShape == null) {
             return Collections.emptyList();
         }
+
+        // Start Preprocessing Timer
+        long prepStartTime = System.nanoTime();
 
         int originalW = originalBitmap.getWidth();
         int originalH = originalBitmap.getHeight();
@@ -402,7 +454,7 @@ public class MainActivity extends AppCompatActivity {
         // --- This is the core logic ---
         if (modelInputType == DataType.FLOAT32) {
             // Model is FLOAT32: Convert 0-255 int to 0.0f-1.0f float
-            Log.d(TAG, "Converting to FLOAT32");
+            // Log.d(TAG, "Converting to FLOAT32"); // Removed for performance
             for (int pixel : pixels) {
                 float r = ((pixel >> 16) & 0xFF) / 255.0f;
                 float g = ((pixel >> 8) & 0xFF) / 255.0f;
@@ -413,7 +465,7 @@ public class MainActivity extends AppCompatActivity {
             }
         } else if (modelInputType == DataType.UINT8) {
             // Model is UINT8: Use raw 0-255 byte values, subtract zeroPoint (usually 0)
-            Log.d(TAG, "Converting to UINT8 (zeroPoint=" + zeroPoint + ")");
+            // Log.d(TAG, "Converting to UINT8 (zeroPoint=" + zeroPoint + ")"); // Removed for performance
             for (int pixel : pixels) {
                 byte r = (byte) (((pixel >> 16) & 0xFF) - zeroPoint);
                 byte g = (byte) (((pixel >> 8) & 0xFF) - zeroPoint);
@@ -424,7 +476,7 @@ public class MainActivity extends AppCompatActivity {
             }
         } else if (modelInputType == DataType.INT8) {
             // Model is INT8: Subtract the zero-point (often 128)
-            Log.d(TAG, "Converting to INT8 (zeroPoint=" + zeroPoint + ")");
+            // Log.d(TAG, "Converting to INT8 (zeroPoint=" + zeroPoint + ")"); // Removed for performance
             for (int pixel : pixels) {
                 // This converts the 0-255 pixel value to the model's required -128 to 127 range
                 byte r = (byte) (((pixel >> 16) & 0xFF) - zeroPoint);
@@ -443,6 +495,10 @@ public class MainActivity extends AppCompatActivity {
 
         // --- [END] FIXED CONVERSION BLOCK ---
 
+        // End Preprocessing Timer
+        totalPreprocessingTimeNs += (System.nanoTime() - prepStartTime);
+
+
         // Run inference
         Object[] inputs = {inputBuffer}; // Pass the correctly formatted buffer
         Map<Integer, Object> outputsMap = new HashMap<>();
@@ -454,9 +510,21 @@ public class MainActivity extends AppCompatActivity {
             outputsMap.put(0, new byte[outputShapes[0][0]][outputShapes[0][1]][outputShapes[0][2]]);
         }
 
+        // Start/End Inference Timer
+        long inferenceStartTime = System.nanoTime();
         tflite.runForMultipleInputsOutputs(inputs, outputsMap);
+        totalInferenceTimeNs += (System.nanoTime() - inferenceStartTime);
 
-        return decodeOutput(outputsMap, originalW, originalH, modelW, modelH, padX, padY, scale);
+
+        // Start Postprocessing Timer
+        long postStartTime = System.nanoTime();
+
+        List<Detection> detections = decodeOutput(outputsMap, originalW, originalH, modelW, modelH, padX, padY, scale);
+
+        // End Postprocessing Timer
+        totalPostprocessingTimeNs += (System.nanoTime() - postStartTime);
+
+        return detections;
     }
 
     private List<Detection> decodeOutput(Map<Integer, Object> outputsMap, int originalW, int originalH,
@@ -781,39 +849,39 @@ public class MainActivity extends AppCompatActivity {
         // Running heavy processing on main thread causes ANR (App Not Responding)
         // We MUST move runMeasurement() to a background thread.
 
-        // 检查 Android 13+ (API 33+)
+        // Check Android 13+ (API 33+)
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_IMAGES) != PackageManager.PERMISSION_GRANTED) {
                 ActivityCompat.requestPermissions(this,
                         new String[]{Manifest.permission.READ_MEDIA_IMAGES}, REQUEST_STORAGE_PERMISSION);
             } else {
                 // Start on background thread
-                new Thread(this::runMeasurement).start(); // 权限已存在
+                new Thread(this::runMeasurement).start(); // Permission already granted
             }
         } else {
-            // Android 12 及以下
+            // Android 12 and below
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
                 ActivityCompat.requestPermissions(this,
                         new String[]{Manifest.permission.READ_EXTERNAL_STORAGE}, REQUEST_STORAGE_PERMISSION);
             } else {
                 // Start on background thread
-                new Thread(this::runMeasurement).start(); // 权限已存在
+                new Thread(this::runMeasurement).start(); // Permission already granted
             }
         }
     }
 
     /**
-     * [MODIFIED] 处理权限结果
+     * [MODIFIED] Handle permission result
      */
     @Override
     public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == REQUEST_STORAGE_PERMISSION) {
             if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                // [GOOD] 权限被授予, Start on background thread to prevent ANR
+                // [GOOD] Permission granted, Start on background thread to prevent ANR
                 new Thread(this::runMeasurement).start();
             } else {
-                // [BAD] 权限被拒绝
+                // [BAD] Permission denied
                 Toast.makeText(this, "Storage permission is required for benchmark", Toast.LENGTH_LONG).show();
                 finish();
             }
