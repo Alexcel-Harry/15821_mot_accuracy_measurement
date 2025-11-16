@@ -18,7 +18,7 @@ HybridTracker::HybridTracker(int frame_rate, int track_buffer, int keyframe_inte
 }
 
 HybridTracker::~HybridTracker() {
-    LOGD("HybridTracker destroyed");
+    // LOGD("HybridTracker destroyed");
 }
 
 bool HybridTracker::isKeyframe() const {
@@ -60,15 +60,15 @@ vector<STrack> HybridTracker::updateWithDetections(const Mat& frame,
     );
 
     if (!klt_tracks.empty()) {
-        LOGD("Keyframe %d: Resyncing %zu ByteTrack KFs with KLT results", frame_count, klt_tracks.size());
+        // LOGD("Keyframe %d: Resyncing %zu ByteTrack KFs with KLT results", frame_count, klt_tracks.size());
         byteTracker.resync_kalman_filters(klt_tracks);
     }
 
-    LOGD("Keyframe %d: Running ByteTrack with %zu detections", frame_count, objects.size());
+    // LOGD("Keyframe %d: Running ByteTrack with %zu detections", frame_count, objects.size());
     vector<STrack> byte_tracks = byteTracker.update(objects);
     last_byte_tracks = byte_tracks;
 
-    LOGD("ByteTrack returned %zu tracks", byte_tracks.size());
+    // LOGD("ByteTrack returned %zu tracks", byte_tracks.size());
 
     if (!byte_tracks.empty() && !frame.empty()) {
         vector<int> track_ids;
@@ -110,10 +110,10 @@ vector<STrack> HybridTracker::updateWithoutDetections(const Mat& frame,
                                                       int frame_height) {
     frame_count++;
 
-    LOGD("Intermediate frame %d: Running MOSSE tracking", frame_count);
+    // LOGD("Intermediate frame %d: Running MOSSE tracking", frame_count);
 
     if (frame.empty()) {
-        LOGD("Empty frame, returning empty tracks");
+        // LOGD("Empty frame, returning empty tracks");
         return vector<STrack>();
     }
 
@@ -134,7 +134,7 @@ vector<STrack> HybridTracker::updateWithoutDetections(const Mat& frame,
             MAX_TRACKS
     );
 
-    LOGD("MOSSE tracking returned %d tracks", count);
+    // LOGD("MOSSE tracking returned %d tracks", count);
 
     // Convert MOSSE results back to STrack format
     return convertMOSSEResultsToSTracks(

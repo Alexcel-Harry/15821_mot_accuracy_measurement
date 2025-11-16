@@ -52,7 +52,7 @@ std::vector<Object> javaToCppObjects(JNIEnv *env, jfloatArray javaDetections, in
     }
 
     env->ReleaseFloatArrayElements(javaDetections, detData, JNI_ABORT);
-    LOGD("Converted %d Java detections to C++ Object vector", numDetections);
+    // LOGD("Converted %d Java detections to C++ Object vector", numDetections);
     return cppDetections;
 }
 
@@ -101,7 +101,7 @@ jfloatArray cppToJavaTracks(JNIEnv *env, const std::vector<STrack>& cppTracks, i
     env->SetFloatArrayRegion(javaTracks, 0, numFloats, trackData);
     delete[] trackData;
 
-    LOGD("Converted %d C++ STracks to Java float[]", numTracks);
+    // LOGD("Converted %d C++ STracks to Java float[]", numTracks);
     return javaTracks;
 }
 
@@ -143,8 +143,8 @@ Java_edu_cmu_cs_face_MainActivity_nativeInitHybridTracker(
         jint keyframe_interval) {
 
     HybridTracker* tracker = new HybridTracker(frame_rate, track_buffer, keyframe_interval);
-    LOGD("HybridTracker initialized: frame_rate=%d, track_buffer=%d, keyframe_interval=%d",
-         (int)frame_rate, (int)track_buffer, (int)keyframe_interval);
+    // LOGD("HybridTracker initialized: frame_rate=%d, track_buffer=%d, keyframe_interval=%d",
+        //  (int)frame_rate, (int)track_buffer, (int)keyframe_interval);
     return reinterpret_cast<jlong>(tracker);
 }
 
@@ -160,7 +160,7 @@ Java_edu_cmu_cs_face_MainActivity_nativeReleaseHybridTracker(
 
     HybridTracker* tracker = reinterpret_cast<HybridTracker*>(tracker_ptr);
     delete tracker;
-    LOGD("HybridTracker released");
+    // LOGD("HybridTracker released");
 }
 
 /**
@@ -262,7 +262,7 @@ Java_edu_cmu_cs_face_MainActivity_nativeResetHybridTracker(
     }
     
     tracker->reset();
-    LOGD("HybridTracker reset");
+    // LOGD("HybridTracker reset");
 }
 
 } // extern "C"

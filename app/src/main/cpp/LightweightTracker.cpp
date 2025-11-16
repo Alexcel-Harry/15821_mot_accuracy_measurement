@@ -14,15 +14,15 @@ const float MAX_SCALE_CHANGE_UP   = 1.03f;
 LightweightTracker::LightweightTracker(int original_width, int original_height, float scale)
         : original_size(original_width, original_height), klt_scale(scale) {
     klt_size = cv::Size(original_width * klt_scale, original_height * klt_scale);
-    LOGD("LightweightTracker created (KLT)");
-    LOGD("Original size: %dx%d, KLT size: %dx%d (Scale: %.2f)",
-         original_size.width, original_size.height,
-         klt_size.width, klt_size.height, klt_scale);
+    // LOGD("LightweightTracker created (KLT)");
+    // LOGD("Original size: %dx%d, KLT size: %dx%d (Scale: %.2f)",
+        //  original_size.width, original_size.height,
+        //  klt_size.width, klt_size.height, klt_scale);
 }
 
 LightweightTracker::~LightweightTracker() {
     clearTrackers();
-    LOGD("LightweightTracker destroyed");
+    // LOGD("LightweightTracker destroyed");
 }
 
 vector<Point2f> LightweightTracker::extractFeaturePoints(const Mat& frame, const Rect2f& bbox) {
@@ -47,7 +47,7 @@ vector<Point2f> LightweightTracker::extractFeaturePoints(const Mat& frame, const
         points.push_back(Point2f(corner.x + safe_bbox.x, corner.y + safe_bbox.y));
     }
     
-    LOGD("Extracted %zu feature points from bbox", points.size());
+    // LOGD("Extracted %zu feature points from bbox", points.size());
     return points;
 }
 
@@ -130,15 +130,15 @@ void LightweightTracker::initializeTrackers(const Mat& frame,
 
         if (obj.points.size() >= 4) {
             tracked_objects.push_back(obj);
-            LOGD("Initialized optical flow tracker for track_id=%d, class=%d, points=%zu",
-                 track_ids[i], class_ids[i], obj.points.size());
+            // LOGD("Initialized optical flow tracker for track_id=%d, class=%d, points=%zu",
+                //  track_ids[i], class_ids[i], obj.points.size());
         } else {
             LOGW("Not enough feature points for track_id=%d", track_ids[i]);
         }
     }
     
-    LOGD("Initialized %zu optical flow trackers from %d detections", 
-         tracked_objects.size(), count);
+    // LOGD("Initialized %zu optical flow trackers from %d detections", 
+        //  tracked_objects.size(), count);
 }
 
 int LightweightTracker::updateTrackers(const Mat& frame,
@@ -241,8 +241,8 @@ int LightweightTracker::updateTrackers(const Mat& frame,
                 obj.frames_tracked++;
 
                 if (obj.points.size() < 10) {
-                    LOGD("Refreshing feature points for track_id=%d (only %zu remaining)",
-                         obj.track_id, obj.points.size());
+                    // LOGD("Refreshing feature points for track_id=%d (only %zu remaining)",
+                        //  obj.track_id, obj.points.size());
                     vector<Point2f> new_features = extractFeaturePoints(curr_gray, klt_bbox);
                     obj.points.insert(obj.points.end(), new_features.begin(), new_features.end());
                 }
@@ -268,15 +268,15 @@ int LightweightTracker::updateTrackers(const Mat& frame,
 
     prev_gray = curr_gray.clone();
 
-    LOGD("Updated %d/%zu optical flow trackers successfully",
-         output_count, tracked_objects.size());
+    // LOGD("Updated %d/%zu optical flow trackers successfully",
+        //  output_count, tracked_objects.size());
     return output_count;
 }
 
 void LightweightTracker::clearTrackers() {
     tracked_objects.clear();
     prev_gray.release();
-    LOGD("Cleared all optical flow trackers");
+    // LOGD("Cleared all optical flow trackers");
 }
 
 bool LightweightTracker::isValidBoundingBox(const Rect2f& bbox, const Size& frame_size) const {

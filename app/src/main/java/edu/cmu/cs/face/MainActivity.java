@@ -51,6 +51,21 @@ import java.util.Map;
 public class MainActivity extends AppCompatActivity {
     private static final String TAG = "MainActivity";
 
+    // ============================================================================
+    // ⭐️ START: NEW GLOBAL TIMERS
+    // ============================================================================
+    private long totalProcessingNanos = 0;
+    private long totalPreprocessingNanos = 0;
+    private long totalFormatConversionNanos = 0;
+    private long totalInferenceNanos = 0;
+    private long totalPostprocessingNanos = 0;
+    private long totalGrayscaleNanos = 0;
+    private long totalJniTrackingNanos = 0;
+    // ============================================================================
+    // ⭐️ END: NEW GLOBAL TIMERS
+    // ============================================================================
+
+
     static {
         System.loadLibrary("bytetrack_jni");
     }
@@ -94,24 +109,24 @@ public class MainActivity extends AppCompatActivity {
      * Keyframe interval (run YOLO every N frames)
      * Higher = faster, Lower = more accurate
      */
-    private static final int KEYFRAME_INTERVAL = 1;
+    private static final int KEYFRAME_INTERVAL = 3;
 
     /**
      * Detection confidence threshold
      */
-    private static final float CONFIDENCE_THRESHOLD = 0.1f; // REVERTED from 0.4f. ByteTrack needs low-confidence detections.
+    private static final float CONFIDENCE_THRESHOLD = 0.01f; // REVERTED from 0.4f. ByteTrack needs low-confidence detections.
     private static final int REQUEST_STORAGE_PERMISSION = 1002;
     /**
      * NMS IoU threshold
      */
-    private static final float NMS_THRESHOLD = 0.45f;
+    private static final float NMS_THRESHOLD = 0.4f;
 
     // ============================================================================
     // END CONFIGURATION
     // ============================================================================
 
     // Model file name
-    private static final String MODEL_FILE = "yolo11s_full_integer_quant.tflite";
+    private static final String MODEL_FILE = "yolo11n_finetune_full_integer_quant.tflite";
 
     // TFLite interpreter
     private Interpreter tflite = null;
@@ -234,7 +249,7 @@ public class MainActivity extends AppCompatActivity {
         Log.i(TAG, "✓ Found " + imageFiles.length + " images");
 
         // Output file
-        File appSpecificDir = getExternalFilesDir(null);
+        File appSpecificDir = getExternalFilesDir("results");
         File outputFile = new File(appSpecificDir, sequenceName + "_results.txt");
         // This will save the file to a path like:
         // /sdcard/Android/data/edu.cmu.cs.face/files/MOT17-02-DPM_results.txt
@@ -256,18 +271,20 @@ public class MainActivity extends AppCompatActivity {
                 File imageFile = imageFiles[frameIdx];
                 int frameNumber = frameIdx + 1;
 
-                // Log progress every 100 frames
-                if (frameIdx % 100 == 0 && frameIdx > 0) {
-                    long elapsed = System.currentTimeMillis() - startTime;
-                    float fps = (frameIdx * 1000.0f / elapsed);
-                    int progress = (frameIdx * 100) / imageFiles.length;
-
-                    Log.i(TAG, String.format("Progress: %d%% (%d/%d) - %.1f FPS",
-                            progress, frameNumber, imageFiles.length, fps));
-                }
+//                // Log progress every 100 frames
+//                if (frameIdx % 100 == 0 && frameIdx > 0) {
+//                    long elapsed = System.currentTimeMillis() - startTime;
+//                    float fps = (frameIdx * 1000.0f / elapsed);
+//                    int progress = (frameIdx * 100) / imageFiles.length;
+//
+//                    Log.i(TAG, String.format("Progress: %d%% (%d/%d) - %.1f FPS",
+//                            progress, frameNumber, imageFiles.length, fps));
+//                }
 
                 // Load frame
+
                 Bitmap frame = BitmapFactory.decodeFile(imageFile.getAbsolutePath());
+                long frameStartTime = System.nanoTime();
                 if (frame == null) {
                     Log.w(TAG, "WARNING: Failed to load " + imageFile.getName());
                     continue;
@@ -306,10 +323,12 @@ public class MainActivity extends AppCompatActivity {
 
                 frame.recycle();
                 processedFrames++;
+                long frameTime = System.nanoTime() - frameStartTime;
+                totalProcessingNanos += frameTime;
             }
 
-            long endTime = System.currentTimeMillis();
-            float totalSeconds = (endTime - startTime) / 1000f;
+//            long endTime = System.currentTimeMillis();
+            float totalSeconds = totalProcessingNanos / 1000000000f;
             float fps = processedFrames / totalSeconds;
 
             Log.i(TAG, "");
@@ -320,8 +339,41 @@ public class MainActivity extends AppCompatActivity {
             Log.i(TAG, "Frames: " + processedFrames);
             Log.i(TAG, "Detections: " + totalDetections);
             Log.i(TAG, "Time: " + String.format("%.1f", totalSeconds) + "s");
-            Log.i(TAG, "FPS: " + String.format("%.2f", fps));
+            Log.i(TAG, "FPS (Total): " + String.format("%.2f", fps));
             Log.i(TAG, "Output: " + outputFile.getAbsolutePath());
+
+
+            // ============================================================================
+            // ⭐️ START: NEW TIMING REPORT BLOCK
+            // ============================================================================
+            Log.i(TAG, "--- Average Amortized Timings (ms) ---");
+            if (processedFrames > 0) {
+                double N = (double) processedFrames;
+                double NANO_TO_MS = 1_000_000.0;
+
+                // These timings are amortized over ALL frames (N),
+                // as requested.
+                Log.i(TAG, String.format(Locale.US, "1. Preprocessing:   %.3f ms", (totalPreprocessingNanos / N / NANO_TO_MS)));
+                Log.i(TAG, String.format(Locale.US, "2. Format Convert:  %.3f ms", (totalFormatConversionNanos / N / NANO_TO_MS)));
+                Log.i(TAG, String.format(Locale.US, "3. Inference:       %.3f ms", (totalInferenceNanos / N / NANO_TO_MS)));
+                Log.i(TAG, String.format(Locale.US, "4. Postprocessing:  %.3f ms", (totalPostprocessingNanos / N / NANO_TO_MS)));
+                Log.i(TAG, String.format(Locale.US, "5. Grayscale (OF):  %.3f ms", (totalGrayscaleNanos / N / NANO_TO_MS)));
+                Log.i(TAG, String.format(Locale.US, "6. JNI (Track/OF):  %.3f ms", (totalJniTrackingNanos / N / NANO_TO_MS)));
+
+                double sumOfPartsMs = (totalPreprocessingNanos + totalFormatConversionNanos + totalInferenceNanos +
+                        totalPostprocessingNanos + totalGrayscaleNanos + totalJniTrackingNanos) / N / NANO_TO_MS;
+                double totalMs = (totalProcessingNanos / N / NANO_TO_MS);
+
+                Log.i(TAG, "-------------------------------------");
+                Log.i(TAG, String.format(Locale.US, "Sum of Parts:     %.3f ms", sumOfPartsMs));
+                Log.i(TAG, String.format(Locale.US, "Total Per-Frame:  %.3f ms (1000/%.2f)", totalMs, fps));
+                Log.i(TAG, String.format(Locale.US, "Other (Load/etc): %.3f ms", (totalMs - sumOfPartsMs)));
+            }
+            // ============================================================================
+            // ⭐️ END: NEW TIMING REPORT BLOCK
+            // ============================================================================
+
+
             Log.i(TAG, "=".repeat(60));
 
         } catch (IOException e) {
@@ -329,17 +381,23 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    /**
+     * ⭐️ MODIFIED: This function now times Grayscale and JNI calls.
+     */
     private List<Detection> processFrame(Bitmap frame, int frameIdx) {
         int originalW = frame.getWidth();
         int originalH = frame.getHeight();
 
         boolean isKeyframe = nativeIsKeyframe(hybridTrackerHandle);
+        float[] trackerOutput;
+        float[] detectArray = null; // Declare outside
 
         if (isKeyframe) {
-            // Detection + tracking
+            // Detection (which includes Pre, Convert, Infer, Post) + tracking
+            // Timers for these are inside runYOLODetection()
             List<Detection> detections = runYOLODetection(frame);
 
-            float[] detectArray = new float[detections.size() * 6];
+            detectArray = new float[detections.size() * 6];
             for (int i = 0; i < detections.size(); i++) {
                 Detection d = detections.get(i);
                 detectArray[i * 6] = d.cx;
@@ -349,25 +407,37 @@ public class MainActivity extends AppCompatActivity {
                 detectArray[i * 6 + 4] = (float)d.classId; // SWAPPED
                 detectArray[i * 6 + 5] = d.confidence;   // SWAPPED
             }
+        }
 
-            byte[] imageData = bitmapToGrayscale(frame);
+        // --- [5. Grayscale (Optical Flow Prep)] ---
+        long startGray = System.nanoTime();
+        byte[] imageData = bitmapToGrayscale(frame);
+        long endGray = System.nanoTime();
+        totalGrayscaleNanos += (endGray - startGray);
+        // --- [END Grayscale] ---
 
-            float[] trackerOutput = nativeUpdateWithDetections(
+
+        // --- [6. JNI (Tracking / Optical Flow)] ---
+        long startJNI = System.nanoTime();
+        if (isKeyframe) {
+            trackerOutput = nativeUpdateWithDetections(
                     hybridTrackerHandle, detectArray, imageData, originalW, originalH);
-
-            return parseTrackerOutput(trackerOutput);
-
         } else {
             // Tracking only
-            byte[] imageData = bitmapToGrayscale(frame);
-
-            float[] trackerOutput = nativeUpdateWithoutDetections(
+            trackerOutput = nativeUpdateWithoutDetections(
                     hybridTrackerHandle, imageData, originalW, originalH);
-
-            return parseTrackerOutput(trackerOutput);
         }
+        long endJNI = System.nanoTime();
+        totalJniTrackingNanos += (endJNI - startJNI);
+        // --- [END JNI] ---
+
+        return parseTrackerOutput(trackerOutput);
     }
 
+
+    /**
+     * ⭐️ MODIFIED: This function now times Preprocessing, Conversion, Inference, and Postprocessing.
+     */
     private List<Detection> runYOLODetection(Bitmap originalBitmap) {
         if (tflite == null || inputShape == null) {
             return Collections.emptyList();
@@ -378,6 +448,9 @@ public class MainActivity extends AppCompatActivity {
         int modelW = inputShape[2]; // Assumes [1, H, W, C]
         int modelH = inputShape[1];
 
+
+        // --- [1. Preprocessing] ---
+        long startPre = System.nanoTime();
         // Letterbox resize
         float scale = Math.min((float) modelW / originalW, (float) modelH / originalH);
         int newW = Math.round(originalW * scale);
@@ -391,7 +464,13 @@ public class MainActivity extends AppCompatActivity {
         canvas.drawColor(Color.rgb(114, 114, 114)); // Same padding color as your code
         canvas.drawBitmap(resized, padX, padY, null);
         resized.recycle();
+        long endPre = System.nanoTime();
+        totalPreprocessingNanos += (endPre - startPre);
+        // --- [END Preprocessing] ---
 
+
+        // --- [2. Format Conversion] ---
+        long startConvert = System.nanoTime();
         // --- [START] FIXED CONVERSION BLOCK ---
 
         // Get the input tensor details (loaded in loadTFLiteModel)
@@ -415,7 +494,7 @@ public class MainActivity extends AppCompatActivity {
         // --- This is the core logic ---
         if (modelInputType == DataType.FLOAT32) {
             // Model is FLOAT32: Convert 0-255 int to 0.0f-1.0f float
-            Log.d(TAG, "Converting to FLOAT32");
+            // Log.d(TAG, "Converting to FLOAT32"); // Removed for performance
             for (int pixel : pixels) {
                 float r = ((pixel >> 16) & 0xFF) / 255.0f;
                 float g = ((pixel >> 8) & 0xFF) / 255.0f;
@@ -426,7 +505,7 @@ public class MainActivity extends AppCompatActivity {
             }
         } else if (modelInputType == DataType.UINT8) {
             // Model is UINT8: Use raw 0-255 byte values, subtract zeroPoint (usually 0)
-            Log.d(TAG, "Converting to UINT8 (zeroPoint=" + zeroPoint + ")");
+            // Log.d(TAG, "Converting to UINT8 (zeroPoint=" + zeroPoint + ")"); // Removed for performance
             for (int pixel : pixels) {
                 byte r = (byte) (((pixel >> 16) & 0xFF) - zeroPoint);
                 byte g = (byte) (((pixel >> 8) & 0xFF) - zeroPoint);
@@ -437,7 +516,7 @@ public class MainActivity extends AppCompatActivity {
             }
         } else if (modelInputType == DataType.INT8) {
             // Model is INT8: Subtract the zero-point (often 128)
-            Log.d(TAG, "Converting to INT8 (zeroPoint=" + zeroPoint + ")");
+            // Log.d(TAG, "Converting to INT8 (zeroPoint=" + zeroPoint + ")"); // Removed for performance
             for (int pixel : pixels) {
                 // This converts the 0-255 pixel value to the model's required -128 to 127 range
                 byte r = (byte) (((pixel >> 16) & 0xFF) - zeroPoint);
@@ -453,8 +532,11 @@ public class MainActivity extends AppCompatActivity {
         }
 
         inputBuffer.rewind(); // Rewind again before passing to TFLite
-
+        long endConvert = System.nanoTime();
+        totalFormatConversionNanos += (endConvert - startConvert);
         // --- [END] FIXED CONVERSION BLOCK ---
+        // --- [END Format Conversion] ---
+
 
         // Run inference
         Object[] inputs = {inputBuffer}; // Pass the correctly formatted buffer
@@ -467,9 +549,22 @@ public class MainActivity extends AppCompatActivity {
             outputsMap.put(0, new byte[outputShapes[0][0]][outputShapes[0][1]][outputShapes[0][2]]);
         }
 
+        // --- [3. Inference] ---
+        long startInfer = System.nanoTime();
         tflite.runForMultipleInputsOutputs(inputs, outputsMap);
+        long endInfer = System.nanoTime();
+        totalInferenceNanos += (endInfer - startInfer);
+        // --- [END Inference] ---
 
-        return decodeOutput(outputsMap, originalW, originalH, modelW, modelH, padX, padY, scale);
+
+        // --- [4. Postprocessing] ---
+        long startPost = System.nanoTime();
+        List<Detection> results = decodeOutput(outputsMap, originalW, originalH, modelW, modelH, padX, padY, scale);
+        long endPost = System.nanoTime();
+        totalPostprocessingNanos += (endPost - startPost);
+        // --- [END Postprocessing] ---
+
+        return results;
     }
 
     private List<Detection> decodeOutput(Map<Integer, Object> outputsMap, int originalW, int originalH,
@@ -718,8 +813,8 @@ public class MainActivity extends AppCompatActivity {
                 try {
                     NnApiDelegate.Options nnApiOptions = new NnApiDelegate.Options();
                     nnApiOptions.setExecutionPreference(NnApiDelegate.Options.EXECUTION_PREFERENCE_SUSTAINED_SPEED);
-                    nnApiOptions.setAllowFp16(true);
-                    nnApiOptions.setUseNnapiCpu(false);
+                    nnApiOptions.setAllowFp16(false);
+                    nnApiOptions.setUseNnapiCpu(true);
 
                     nnApiDelegate = new NnApiDelegate(nnApiOptions);
                     opts.addDelegate(nnApiDelegate);
