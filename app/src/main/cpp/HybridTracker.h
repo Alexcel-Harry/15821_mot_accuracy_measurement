@@ -26,7 +26,7 @@ public:
      * @param track_buffer ByteTrack parameter for how long to keep lost tracks
      * @param keyframe_interval How many frames between YOLO runs (e.g., 3 = YOLO every 3 frames)
      */
-    explicit HybridTracker(int frame_rate = 30, int track_buffer = 30, int keyframe_interval = 3, int frame_width = 1280, int frame_height = 720);
+    explicit HybridTracker(int frame_rate = 30, int track_buffer = 30, int frame_width = 1280, int frame_height = 720, int keyframe_interval = 1);
     ~HybridTracker();
 
     /**
@@ -57,11 +57,6 @@ public:
                                            int frame_width,
                                            int frame_height);
 
-    /**
-     * Determine if current frame should be a keyframe.
-     * @return true if YOLO should be run on this frame
-     */
-    [[nodiscard]] bool isKeyframe() const;
 
     /**
      * Reset the tracker state.
@@ -73,14 +68,6 @@ public:
      */
     [[nodiscard]] int getFrameCount() const { return frame_count; }
 
-    /**
-     * Set keyframe interval.
-     */
-    void setKeyframeInterval(int interval) {
-        if (interval > 0) {
-            keyframe_interval = interval;
-        }
-    }
 
 private:
     BYTETracker byteTracker;

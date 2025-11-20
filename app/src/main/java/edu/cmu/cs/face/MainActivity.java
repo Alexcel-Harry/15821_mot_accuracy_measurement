@@ -3,14 +3,6 @@ package edu.cmu.cs.face;
 import android.Manifest;
 import android.content.pm.PackageManager;
 import android.content.res.AssetFileDescriptor;
-import android.os.Bundle;
-import android.util.Log;
-
-import androidx.annotation.NonNull;
-import androidx.appcompat.app.AppCompatActivity;
-import androidx.core.app.ActivityCompat;
-import androidx.core.content.ContextCompat;
-
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
@@ -19,6 +11,11 @@ import android.os.Build;
 import android.os.Bundle;
 import android.util.Log;
 import android.widget.Toast;
+
+import androidx.annotation.NonNull;
+import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
 
 import org.tensorflow.lite.DataType;
 import org.tensorflow.lite.Interpreter;
@@ -59,61 +56,23 @@ public class MainActivity extends AppCompatActivity {
     // CONFIGURATION - MODIFY THESE VALUES
     // ============================================================================
 
-    /**
-     * Path to the sequence folder (containing img1/ subdirectory)
-     *
-     * Example: "/sdcard/MOT17/train/MOT17-02-DPM"
-     *
-     * Structure expected:
-     * /sdcard/MOT17/train/MOT17-02-DPM/
-     * img1/
-     * 000001.jpg
-     * 000002.jpg
-     * ...
-     */
     private static final String SEQUENCE_PATH = "/sdcard/Pictures/MOT17_resized_1280x720/train/MOT17-02-DPM";
+    private static final int VIDEO_FPS = 30;
+    private static final int TRACK_BUFFER = 30;
 
-    /**
-     * FPS for Kalman filter
-     * TODO: Set this to your video's actual frame rate!
-     *
-     * This affects:
-     * - Kalman filter time step (dt = 1.0 / FPS)c
-     * - Track buffer timeout
-     * - Motion prediction
-     */
-    private static final int VIDEO_FPS = 30;  // TODO: CHANGE THIS!
+    // Set to 1 for Pure ByteTrack (C++ will bypass MOSSE), >1 for Hybrid
+    private static final int KEYFRAME_INTERVAL = 3;
 
-    /**
-     * Track buffer (frames to keep lost tracks)
-     * Recommended: Set equal to VIDEO_FPS (1 second buffer)
-     */
-    private static final int TRACK_BUFFER = 30;  // TODO: Usually same as VIDEO_FPS
-
-    /**
-     * Keyframe interval (run YOLO every N frames)
-     * Higher = faster, Lower = more accurate
-     */
-    private static final int KEYFRAME_INTERVAL = 6;
-
-    /**
-     * Detection confidence threshold
-     */
-    private static final float CONFIDENCE_THRESHOLD = 0.1f; // REVERTED from 0.4f. ByteTrack needs low-confidence detections.
+    private static final float CONFIDENCE_THRESHOLD = 0.1f;
     private static final int REQUEST_STORAGE_PERMISSION = 1002;
-    /**
-     * NMS IoU threshold
-     */
     private static final float NMS_THRESHOLD = 0.45f;
 
     // ============================================================================
     // END CONFIGURATION
     // ============================================================================
 
-    // Model file name
-    private static final String MODEL_FILE = "yolo11s_full_integer_quant.tflite";
+    private static final String MODEL_FILE = "yolo11n_full_integer_quant.tflite";
 
-    // TFLite interpreter
     private Interpreter tflite = null;
     private NnApiDelegate nnApiDelegate = null;
     private int[] inputShape = null;
@@ -122,25 +81,23 @@ public class MainActivity extends AppCompatActivity {
     private int[][] outputShapes = null;
     private DataType[] outputDataTypes = null;
 
-    // Tracker
     private long hybridTrackerHandle = 0;
+    private int frameCounter = 0; // [FIX] Track frames in Java
 
     // --- Global latency accumulators (in nanoseconds) ---
     private long totalPreprocessingTimeNs = 0;
     private long totalInferenceTimeNs = 0;
     private long totalPostprocessingTimeNs = 0;
-    private long totalTrackingTimeNs = 0; // ByteTrack update
-    private long totalOpticalFlowTimeNs = 0; // Optical Flow update
-
+    private long totalTrackingTimeNs = 0;
+    private long totalOpticalFlowTimeNs = 0;
 
     // Native methods
     public native long nativeInitHybridTracker(int frameRate, int trackBuffer, int keyframeInterval);
     public native void nativeReleaseHybridTracker(long trackerPtr);
-    public native boolean nativeIsKeyframe(long trackerPtr);
+    // [FIX] Removed nativeIsKeyframe because it doesn't exist in JNI
     public native float[] nativeUpdateWithDetections(long trackerPtr, float[] detections, byte[] imageData, int w, int h);
     public native float[] nativeUpdateWithoutDetections(long trackerPtr, byte[] imageData, int w, int h);
 
-    // Detection class
     private static class Detection {
         float cx, cy, w, h;
         int classId;
@@ -171,11 +128,9 @@ public class MainActivity extends AppCompatActivity {
         Log.i(TAG, "Keyframe interval: " + KEYFRAME_INTERVAL);
         Log.i(TAG, "Model: " + MODEL_FILE);
         requestStoragePermission();
-
     }
 
     private void runMeasurement() {
-        // Load model
         Log.i(TAG, "");
         Log.i(TAG, "Loading TFLite model...");
         if (!loadTFLiteModel(MODEL_FILE)) {
@@ -184,7 +139,6 @@ public class MainActivity extends AppCompatActivity {
         }
         Log.i(TAG, "✓ Model loaded");
 
-        // Initialize tracker
         Log.i(TAG, "Initializing tracker...");
         hybridTrackerHandle = nativeInitHybridTracker(VIDEO_FPS, TRACK_BUFFER, KEYFRAME_INTERVAL);
         if (hybridTrackerHandle == 0) {
@@ -193,7 +147,6 @@ public class MainActivity extends AppCompatActivity {
         }
         Log.i(TAG, "✓ Tracker initialized (FPS=" + VIDEO_FPS + ")");
 
-        // Get sequence info
         File seqDir = new File(SEQUENCE_PATH);
         String sequenceName = seqDir.getName();
         File imgDir = new File(seqDir, "img1");
@@ -209,14 +162,12 @@ public class MainActivity extends AppCompatActivity {
 
         File[] allFiles = imgDir.listFiles();
 
-        // 2. Check for null (This is the most common permissions error)
         if (allFiles == null) {
             Log.e(TAG, "FATAL ERROR: allFiles array is NULL. Directory is inaccessible.");
             Log.e(TAG, ">>> LIKELY FIX: Grant READ_EXTERNAL_STORAGE permission in App Settings.");
             return;
         }
 
-        // 4. Now, filter the list in Java
         List<File> imageFileList = new ArrayList<>();
         for (File f : allFiles) {
             String name = f.getName().toLowerCase();
@@ -224,14 +175,8 @@ public class MainActivity extends AppCompatActivity {
                 imageFileList.add(f);
             }
         }
-        File[] imageFiles = imageFileList.toArray(new File[0]); // Convert List to Array
+        File[] imageFiles = imageFileList.toArray(new File[0]);
 
-        // ====================================================================
-        // END DEBUGGING BLOCK
-        // ====================================================================
-
-
-        // 5. Your original check, now much more informative
         if (imageFiles.length == 0) {
             Log.e(TAG, "ERROR: No images found *after filtering*.");
             Log.e(TAG, "Found " + allFiles.length + " total items, but 0 matched the .jpg/.png filter.");
@@ -241,16 +186,11 @@ public class MainActivity extends AppCompatActivity {
         Arrays.sort(imageFiles, Comparator.comparing(File::getName));
         Log.i(TAG, "✓ Found " + imageFiles.length + " images");
 
-        // Limit to 600 frames for latency measurement
         int framesToProcess = Math.min(imageFiles.length, 600);
         Log.i(TAG, "Processing " + framesToProcess + " frames for latency measurement");
 
-        // Output file for amortized latency measurements
         File appSpecificDir = getExternalFilesDir(null);
         File outputFile = new File(appSpecificDir, sequenceName + "_amortized_latency.csv");
-        // This will save the file to a path like:
-        // /sdcard/Android/data/edu.cmu.cs.face/files/MOT17-02-DPM_amortized_latency.csv
-
         Log.i(TAG, "Output: " + outputFile.getAbsolutePath());
 
         Log.i(TAG, "");
@@ -258,15 +198,16 @@ public class MainActivity extends AppCompatActivity {
         Log.i(TAG, "Starting processing...");
         Log.i(TAG, "=".repeat(60));
 
-        // Process sequence and measure latency
         long overallStartTime = System.currentTimeMillis();
         int processedFrames = 0;
+
+        // [FIX] Reset frame counter at start of measurement
+        frameCounter = 0;
 
         for (int frameIdx = 0; frameIdx < framesToProcess; frameIdx++) {
             File imageFile = imageFiles[frameIdx];
             int frameNumber = frameIdx + 1;
 
-            // Log progress every 100 frames
             if (frameIdx % 100 == 0 && frameIdx > 0) {
                 long elapsed = System.currentTimeMillis() - overallStartTime;
                 float fps = (frameIdx * 1000.0f / elapsed);
@@ -276,14 +217,12 @@ public class MainActivity extends AppCompatActivity {
                         progress, frameNumber, framesToProcess, fps));
             }
 
-            // Load frame
             Bitmap frame = BitmapFactory.decodeFile(imageFile.getAbsolutePath());
             if (frame == null) {
                 Log.w(TAG, "WARNING: Failed to load " + imageFile.getName());
                 continue;
             }
 
-            // Timing is now handled *inside* processFrame and runYOLODetection
             processFrame(frame, frameIdx);
 
             frame.recycle();
@@ -294,7 +233,6 @@ public class MainActivity extends AppCompatActivity {
         float totalSeconds = (overallEndTime - overallStartTime) / 1000f;
         float fps = (processedFrames > 0) ? (processedFrames / totalSeconds) : 0;
 
-        // --- [MODIFIED] Calculate amortized averages AND totals ---
         double avgPrepMs = 0, avgInferenceMs = 0, avgPostMs = 0, avgTrackMs = 0, avgOpticalFlowMs = 0;
 
         if (processedFrames > 0) {
@@ -305,28 +243,18 @@ public class MainActivity extends AppCompatActivity {
             avgOpticalFlowMs = (totalOpticalFlowTimeNs / (double) processedFrames) / 1_000_000.0;
         }
 
-        // Calculate totals in milliseconds
         double totalPrepMs = totalPreprocessingTimeNs / 1_000_000.0;
         double totalInferenceMs = totalInferenceTimeNs / 1_000_000.0;
         double totalPostMs = totalPostprocessingTimeNs / 1_000_000.0;
         double totalTrackMs = totalTrackingTimeNs / 1_000_000.0;
         double totalOpticalFlowMs = totalOpticalFlowTimeNs / 1_000_000.0;
 
-
         try (FileWriter writer = new FileWriter(outputFile)) {
-            // Row 1: Amortized Averages (ms) + Total Time (s)
             writer.write(String.format(Locale.US, "%.4f,%.4f,%.4f,%.4f,%.4f\n",
                     avgPrepMs, avgInferenceMs, avgPostMs, avgTrackMs, avgOpticalFlowMs));
-
-//            // Row 2: Total Stage Times (ms)
-//            writer.write(String.format(Locale.US, "%.4f,%.4f,%.4f,%.4f,%.4f\n",
-//                    totalPrepMs, totalInferenceMs, totalPostMs, totalTrackMs, totalOpticalFlowMs));
-
         } catch (IOException e) {
             Log.e(TAG, "ERROR: Failed to write amortized latency results", e);
         }
-        // --- [END MODIFIED] ---
-
 
         Log.i(TAG, "");
         Log.i(TAG, "=".repeat(60));
@@ -339,7 +267,6 @@ public class MainActivity extends AppCompatActivity {
         Log.i(TAG, "Output: " + outputFile.getAbsolutePath());
         Log.i(TAG, "=".repeat(60));
 
-        // --- [MODIFIED] Log amortized AND total results ---
         Log.i(TAG, "Amortized Averages (ms):");
         Log.i(TAG, String.format(Locale.US, "  Preprocessing: %.4f ms", avgPrepMs));
         Log.i(TAG, String.format(Locale.US, "  Inference:     %.4f ms", avgInferenceMs));
@@ -354,19 +281,32 @@ public class MainActivity extends AppCompatActivity {
         Log.i(TAG, String.format(Locale.US, "  Total Tracking:      %.2f ms", totalTrackMs));
         Log.i(TAG, String.format(Locale.US, "  Total Optical Flow:  %.2f ms", totalOpticalFlowMs));
         Log.i(TAG, "=".repeat(60));
-        // --- [END MODIFIED] ---
     }
 
     private List<Detection> processFrame(Bitmap frame, int frameIdx) {
         int originalW = frame.getWidth();
         int originalH = frame.getHeight();
 
-        boolean isKeyframe = nativeIsKeyframe(hybridTrackerHandle);
+        boolean isKeyframe = (frameCounter % KEYFRAME_INTERVAL == 0);
+        List<Detection> result;
+
+        // ------------------------------------------------------------
+        // 1. MEASURE CONVERSION TIME (Runs on EVERY frame)
+        // ------------------------------------------------------------
+        long conversionStart = System.nanoTime();
+        byte[] imageData = bitmapToGrayscale(frame);
+        long conversionDuration = System.nanoTime() - conversionStart;
+
+        // Add this to a new accumulator or Preprocessing
+        // We add to Preprocessing here so it shows up in your existing CSV
+        totalPreprocessingTimeNs += conversionDuration;
 
         if (isKeyframe) {
-            // Detection + tracking
-            // Preprocessing, Inference, and Postprocessing
-            // timing is now handled *inside* runYOLODetection()
+            // ------------------------------------------------------------
+            // KEYFRAME BRANCH
+            // ------------------------------------------------------------
+
+            // YOLO (This has its own internal timers in runYOLODetection)
             List<Detection> detections = runYOLODetection(frame);
 
             float[] detectArray = new float[detections.size() * 6];
@@ -376,32 +316,34 @@ public class MainActivity extends AppCompatActivity {
                 detectArray[i * 6 + 1] = d.cy;
                 detectArray[i * 6 + 2] = d.w;
                 detectArray[i * 6 + 3] = d.h;
-                detectArray[i * 6 + 4] = (float)d.classId; // SWAPPED
-                detectArray[i * 6 + 5] = d.confidence;   // SWAPPED
+                detectArray[i * 6 + 4] = (float)d.classId;
+                detectArray[i * 6 + 5] = d.confidence;
             }
 
-            byte[] imageData = bitmapToGrayscale(frame);
-
-            // Time the tracking update
+            // Update Tracker (Native Only)
             long trackStartTime = System.nanoTime();
             float[] trackerOutput = nativeUpdateWithDetections(
                     hybridTrackerHandle, detectArray, imageData, originalW, originalH);
             totalTrackingTimeNs += (System.nanoTime() - trackStartTime);
 
-            return parseTrackerOutput(trackerOutput);
+            result = parseTrackerOutput(trackerOutput);
 
         } else {
-            // Tracking only
-            byte[] imageData = bitmapToGrayscale(frame);
+            // ------------------------------------------------------------
+            // INTERMEDIATE BRANCH (The one you were missing!)
+            // ------------------------------------------------------------
 
-            // Time the optical flow update
+            // Native Optical Flow
             long ofStartTime = System.nanoTime();
             float[] trackerOutput = nativeUpdateWithoutDetections(
                     hybridTrackerHandle, imageData, originalW, originalH);
             totalOpticalFlowTimeNs += (System.nanoTime() - ofStartTime);
 
-            return parseTrackerOutput(trackerOutput);
+            result = parseTrackerOutput(trackerOutput);
         }
+
+        frameCounter++;
+        return result;
     }
 
     private List<Detection> runYOLODetection(Bitmap originalBitmap) {
@@ -409,15 +351,13 @@ public class MainActivity extends AppCompatActivity {
             return Collections.emptyList();
         }
 
-        // Start Preprocessing Timer
-        long prepStartTime = System.nanoTime();
+//        long prepStartTime = System.nanoTime();
 
         int originalW = originalBitmap.getWidth();
         int originalH = originalBitmap.getHeight();
-        int modelW = inputShape[2]; // Assumes [1, H, W, C]
+        int modelW = inputShape[2];
         int modelH = inputShape[1];
 
-        // Letterbox resize
         float scale = Math.min((float) modelW / originalW, (float) modelH / originalH);
         int newW = Math.round(originalW * scale);
         int newH = Math.round(originalH * scale);
@@ -426,35 +366,28 @@ public class MainActivity extends AppCompatActivity {
 
         Bitmap resized = Bitmap.createScaledBitmap(originalBitmap, newW, newH, true);
         Bitmap letterbox = Bitmap.createBitmap(modelW, modelH, Bitmap.Config.ARGB_8888);
+        long prepStartTime = System.nanoTime();
         android.graphics.Canvas canvas = new android.graphics.Canvas(letterbox);
-        canvas.drawColor(Color.rgb(114, 114, 114)); // Same padding color as your code
+        canvas.drawColor(Color.rgb(114, 114, 114));
         canvas.drawBitmap(resized, padX, padY, null);
         resized.recycle();
 
-        // --- [START] FIXED CONVERSION BLOCK ---
-
-        // Get the input tensor details (loaded in loadTFLiteModel)
         Tensor inputTensor = tflite.getInputTensor(0);
-        DataType modelInputType = inputTensor.dataType(); // Get the *actual* model type
+        DataType modelInputType = inputTensor.dataType();
 
-        // Get model quantization parameters (if they exist)
         Tensor.QuantizationParams qp = inputTensor.quantizationParams();
         final int zeroPoint = qp.getZeroPoint();
 
-        // Allocate the input buffer with the exact size the model expects
         ByteBuffer inputBuffer = ByteBuffer.allocateDirect(inputTensor.numBytes());
         inputBuffer.order(ByteOrder.nativeOrder());
 
         int[] pixels = new int[modelW * modelH];
         letterbox.getPixels(pixels, 0, modelW, 0, 0, modelW, modelH);
-        letterbox.recycle(); // Recycle the letterbox bitmap
+        letterbox.recycle();
 
-        inputBuffer.rewind(); // Ensure buffer is at position 0
+        inputBuffer.rewind();
 
-        // --- This is the core logic ---
         if (modelInputType == DataType.FLOAT32) {
-            // Model is FLOAT32: Convert 0-255 int to 0.0f-1.0f float
-            // Log.d(TAG, "Converting to FLOAT32"); // Removed for performance
             for (int pixel : pixels) {
                 float r = ((pixel >> 16) & 0xFF) / 255.0f;
                 float g = ((pixel >> 8) & 0xFF) / 255.0f;
@@ -464,8 +397,6 @@ public class MainActivity extends AppCompatActivity {
                 inputBuffer.putFloat(b);
             }
         } else if (modelInputType == DataType.UINT8) {
-            // Model is UINT8: Use raw 0-255 byte values, subtract zeroPoint (usually 0)
-            // Log.d(TAG, "Converting to UINT8 (zeroPoint=" + zeroPoint + ")"); // Removed for performance
             for (int pixel : pixels) {
                 byte r = (byte) (((pixel >> 16) & 0xFF) - zeroPoint);
                 byte g = (byte) (((pixel >> 8) & 0xFF) - zeroPoint);
@@ -475,10 +406,7 @@ public class MainActivity extends AppCompatActivity {
                 inputBuffer.put(b);
             }
         } else if (modelInputType == DataType.INT8) {
-            // Model is INT8: Subtract the zero-point (often 128)
-            // Log.d(TAG, "Converting to INT8 (zeroPoint=" + zeroPoint + ")"); // Removed for performance
             for (int pixel : pixels) {
-                // This converts the 0-255 pixel value to the model's required -128 to 127 range
                 byte r = (byte) (((pixel >> 16) & 0xFF) - zeroPoint);
                 byte g = (byte) (((pixel >> 8) & 0xFF) - zeroPoint);
                 byte b = (byte) ((pixel & 0xFF) - zeroPoint);
@@ -491,37 +419,27 @@ public class MainActivity extends AppCompatActivity {
             return Collections.emptyList();
         }
 
-        inputBuffer.rewind(); // Rewind again before passing to TFLite
+        inputBuffer.rewind();
 
-        // --- [END] FIXED CONVERSION BLOCK ---
-
-        // End Preprocessing Timer
         totalPreprocessingTimeNs += (System.nanoTime() - prepStartTime);
 
-
-        // Run inference
-        Object[] inputs = {inputBuffer}; // Pass the correctly formatted buffer
+        Object[] inputs = {inputBuffer};
         Map<Integer, Object> outputsMap = new HashMap<>();
 
-        // This part remains the same
         if (outputDataTypes[0] == DataType.FLOAT32) {
             outputsMap.put(0, new float[outputShapes[0][0]][outputShapes[0][1]][outputShapes[0][2]]);
         } else {
             outputsMap.put(0, new byte[outputShapes[0][0]][outputShapes[0][1]][outputShapes[0][2]]);
         }
 
-        // Start/End Inference Timer
         long inferenceStartTime = System.nanoTime();
         tflite.runForMultipleInputsOutputs(inputs, outputsMap);
         totalInferenceTimeNs += (System.nanoTime() - inferenceStartTime);
 
-
-        // Start Postprocessing Timer
         long postStartTime = System.nanoTime();
 
         List<Detection> detections = decodeOutput(outputsMap, originalW, originalH, modelW, modelH, padX, padY, scale);
 
-        // End Postprocessing Timer
         totalPostprocessingTimeNs += (System.nanoTime() - postStartTime);
 
         return detections;
@@ -541,7 +459,6 @@ public class MainActivity extends AppCompatActivity {
             return Collections.emptyList();
         }
 
-        // Dequantize output
         float[][] dequantized = new float[numPredictions][numDetails];
         if (outType == DataType.FLOAT32) {
             float[][][] rawFloat = (float[][][]) outputsMap.get(0);
@@ -551,7 +468,6 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
         } else {
-            // Quantized model (INT8/UINT8)
             byte[][][] rawByte = (byte[][][]) outputsMap.get(0);
             Tensor.QuantizationParams qp = outputTensor.quantizationParams();
             float scale_q = qp.getScale();
@@ -566,45 +482,29 @@ public class MainActivity extends AppCompatActivity {
             }
         }
 
-        // --- MODIFIED BLOCK START ---
-        // Based on user feedback to fix classId mismatch and filter for people
-        //
-        // This logic assumes a multi-class YOLO output format like:
-        // [cx, cy, w, h, class0_score, class1_score, ..., classN_score]
-        //
-        // Fix 1: Find max score and correct classId (j - 4)
-        // Fix 2: Filter for 'person' (classId == 0) and confidence
-
         ArrayList<RectF> boxes = new ArrayList<>();
         ArrayList<Float> confidences = new ArrayList<>();
-        ArrayList<Integer> classIds = new ArrayList<>(); // ADDED: We need to pass the classId to the tracker
+        ArrayList<Integer> classIds = new ArrayList<>();
 
         for (int i = 0; i < numPredictions; i++) {
             float[] row = dequantized[i];
-
-            // Find the max class score and its ID
-            // (Assumes class scores start at index 4)
             float maxScore = -1.0f;
             int classId = -1;
 
-            // Loop starts at 4, as 0-3 are box coords
             for (int j = 4; j < numDetails; j++) {
                 float score = row[j];
                 if (score > maxScore) {
                     maxScore = score;
-                    classId = j - 4; // User's specified fix for classId mismatch
+                    classId = j - 4;
                 }
             }
 
-            // Apply confidence threshold. We pass ALL classes to the native tracker.
-            if (maxScore >= CONFIDENCE_THRESHOLD) { // REMOVED classId == 0 filter
-                // Bounding box coordinates are at indices 0-3
+            if (maxScore >= CONFIDENCE_THRESHOLD) {
                 float cx = row[0];
                 float cy = row[1];
                 float w_norm = row[2];
                 float h_norm = row[3];
 
-                // Convert from normalized [0,1] to pixel coordinates [0, modelW]
                 float pixel_w = w_norm * modelW;
                 float pixel_h = h_norm * modelH;
                 float left = (cx * modelW) - (pixel_w / 2f);
@@ -612,16 +512,12 @@ public class MainActivity extends AppCompatActivity {
 
                 boxes.add(new RectF(left, top, left + pixel_w, top + pixel_h));
                 confidences.add(maxScore);
-                classIds.add(classId); // ADDED: Store the classId
+                classIds.add(classId);
             }
         }
-        // --- MODIFIED BLOCK END ---
 
-
-        // NMS
         List<Integer> indices = nonMaxSuppression(boxes, confidences);
 
-        // Map to original coordinates
         List<Detection> finalDetections = new ArrayList<>();
         float padXf = (float) padX;
         float padYf = (float) padY;
@@ -653,7 +549,6 @@ public class MainActivity extends AppCompatActivity {
 
             if (final_w > 1 && final_h > 1) {
                 finalDetections.add(
-                        // Pass the actual classId to the tracker
                         new Detection(norm_cx, norm_cy, norm_w, norm_h, classIds.get(index), confidences.get(index), -1)
                 );
             }
@@ -720,13 +615,11 @@ public class MainActivity extends AppCompatActivity {
             float w = trackerOutput[i * 7 + 2];
             float h = trackerOutput[i * 7 + 3];
 
-            // --- FIX ---
-            // The JNI returns [..., classId, conf, trackId]
-            // We had them swapped. This matches the reference file.
+            // [FIX] Swapped indices 4 and 5 to match your C++ output format
             int classId = (int) trackerOutput[i * 7 + 4];
             float conf = trackerOutput[i * 7 + 5];
+
             int trackId = (int) trackerOutput[i * 7 + 6];
-            // --- END FIX ---
 
             result.add(new Detection(cx, cy, w, h, classId, conf, trackId));
         }
@@ -762,7 +655,6 @@ public class MainActivity extends AppCompatActivity {
 
             Interpreter.Options opts = new Interpreter.Options();
 
-            // Check for Pixel TPU (ESSENTIAL - DO NOT REMOVE)
             String deviceModel = Build.MODEL;
             String deviceManufacturer = Build.MANUFACTURER;
             boolean isPixelWithTensor = "Google".equalsIgnoreCase(deviceManufacturer) &&
@@ -845,43 +737,32 @@ public class MainActivity extends AppCompatActivity {
         super.onDestroy();
         cleanup();
     }
-    private void requestStoragePermission() {
-        // Running heavy processing on main thread causes ANR (App Not Responding)
-        // We MUST move runMeasurement() to a background thread.
 
-        // Check Android 13+ (API 33+)
+    private void requestStoragePermission() {
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_MEDIA_IMAGES) != PackageManager.PERMISSION_GRANTED) {
                 ActivityCompat.requestPermissions(this,
                         new String[]{Manifest.permission.READ_MEDIA_IMAGES}, REQUEST_STORAGE_PERMISSION);
             } else {
-                // Start on background thread
-                new Thread(this::runMeasurement).start(); // Permission already granted
+                new Thread(this::runMeasurement).start();
             }
         } else {
-            // Android 12 and below
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
                 ActivityCompat.requestPermissions(this,
                         new String[]{Manifest.permission.READ_EXTERNAL_STORAGE}, REQUEST_STORAGE_PERMISSION);
             } else {
-                // Start on background thread
-                new Thread(this::runMeasurement).start(); // Permission already granted
+                new Thread(this::runMeasurement).start();
             }
         }
     }
 
-    /**
-     * [MODIFIED] Handle permission result
-     */
     @Override
     public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == REQUEST_STORAGE_PERMISSION) {
             if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                // [GOOD] Permission granted, Start on background thread to prevent ANR
                 new Thread(this::runMeasurement).start();
             } else {
-                // [BAD] Permission denied
                 Toast.makeText(this, "Storage permission is required for benchmark", Toast.LENGTH_LONG).show();
                 finish();
             }

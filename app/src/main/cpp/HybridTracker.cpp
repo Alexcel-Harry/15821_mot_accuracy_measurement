@@ -8,26 +8,17 @@ using namespace std;
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 
-HybridTracker::HybridTracker(int frame_rate, int track_buffer, int keyframe_interval, int frame_width, int frame_height)
+HybridTracker::HybridTracker(int frame_rate, int track_buffer, int frame_width, int frame_height, int keyframe_interval)
         : byteTracker(frame_rate, track_buffer),
           lightweight_tracker(frame_width, frame_height, 0.5f),
           frame_count(0),
-          keyframe_interval(keyframe_interval) {
-    LOGI("HybridTracker initialized: frame_rate=%d, track_buffer=%d, keyframe_interval=%d",
-         frame_rate, track_buffer, keyframe_interval);
+          keyframe_interval(keyframe_interval) { // Initialize the member variable
+
+    LOGI("HybridTracker created with Interval: %d", this->keyframe_interval);
 }
 
 HybridTracker::~HybridTracker() {
     LOGD("HybridTracker destroyed");
-}
-
-bool HybridTracker::isKeyframe() const {
-    // First frame is always a keyframe
-    if (frame_count == 0) {
-        return true;
-    }
-    // Every keyframe_interval frames is a keyframe
-    return (frame_count % keyframe_interval) == 0;
 }
 
 vector<STrack> HybridTracker::updateWithDetections(const Mat& frame,
@@ -35,7 +26,19 @@ vector<STrack> HybridTracker::updateWithDetections(const Mat& frame,
                                                    int frame_width,
                                                    int frame_height) {
     frame_count++;
+    if (this->keyframe_interval == 1) {
+        // ----------------------------------------------------------------
+        // OPTION A: PURE BYTETRACK MODE
+        // Bypass MOSSE entirely. Save ~15ms of overhead.
+        // ----------------------------------------------------------------
+        LOGD("Interval 1 detected: Running Pure ByteTrack Logic");
 
+        // 1. Direct ByteTrack Update
+        vector<STrack> byte_tracks = byteTracker.update(objects);
+        last_byte_tracks = byte_tracks;
+
+        return byte_tracks;
+    }
     const int MAX_TRACKS = 100;
 
     // [修改] 使用 std::vector 替代 C 风格数组，更安全

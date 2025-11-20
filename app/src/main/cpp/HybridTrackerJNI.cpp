@@ -142,9 +142,13 @@ Java_edu_cmu_cs_face_MainActivity_nativeInitHybridTracker(
         jint track_buffer,
         jint keyframe_interval) {
 
-    HybridTracker* tracker = new HybridTracker(frame_rate, track_buffer, keyframe_interval);
-    LOGD("HybridTracker initialized: frame_rate=%d, track_buffer=%d, keyframe_interval=%d",
-         (int)frame_rate, (int)track_buffer, (int)keyframe_interval);
+    int width = 1280;
+    int height = 720;
+
+    HybridTracker* tracker = new HybridTracker(frame_rate, track_buffer, width, height, keyframe_interval);
+
+    LOGD("HybridTracker initialized: frame_rate=%d, track_buffer=%d, size=%dx%d",
+         (int)frame_rate, (int)track_buffer, width, height);
     return reinterpret_cast<jlong>(tracker);
 }
 
@@ -161,25 +165,6 @@ Java_edu_cmu_cs_face_MainActivity_nativeReleaseHybridTracker(
     HybridTracker* tracker = reinterpret_cast<HybridTracker*>(tracker_ptr);
     delete tracker;
     LOGD("HybridTracker released");
-}
-
-/**
- * Check if current frame should be a keyframe
- * Java: native boolean nativeIsKeyframe(long trackerPtr)
- */
-JNIEXPORT jboolean JNICALL
-Java_edu_cmu_cs_face_MainActivity_nativeIsKeyframe(
-        JNIEnv *env,
-        jobject thiz,
-        jlong tracker_ptr) {
-
-    HybridTracker* tracker = reinterpret_cast<HybridTracker*>(tracker_ptr);
-    if (tracker == nullptr) {
-        LOGE("Tracker pointer is null in nativeIsKeyframe!");
-        return JNI_FALSE;
-    }
-    
-    return tracker->isKeyframe() ? JNI_TRUE : JNI_FALSE;
 }
 
 /**
