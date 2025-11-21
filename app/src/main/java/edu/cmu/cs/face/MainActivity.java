@@ -80,9 +80,10 @@ public class MainActivity extends AppCompatActivity {
     private int outputCount = 0;
     private int[][] outputShapes = null;
     private DataType[] outputDataTypes = null;
+    private Bitmap reusableLetterboxBmp = null;  // Reuse to avoid allocations
 
     private long hybridTrackerHandle = 0;
-    private int frameCounter = 0; // [FIX] Track frames in Java
+    private int frameCounter = 0;
 
     // --- Global latency accumulators (in nanoseconds) ---
     private long totalPreprocessingTimeNs = 0;
@@ -94,7 +95,6 @@ public class MainActivity extends AppCompatActivity {
     // Native methods
     public native long nativeInitHybridTracker(int frameRate, int trackBuffer, int keyframeInterval);
     public native void nativeReleaseHybridTracker(long trackerPtr);
-    // [FIX] Removed nativeIsKeyframe because it doesn't exist in JNI
     public native float[] nativeUpdateWithDetections(long trackerPtr, float[] detections, byte[] imageData, int w, int h);
     public native float[] nativeUpdateWithoutDetections(long trackerPtr, byte[] imageData, int w, int h);
 
@@ -201,7 +201,7 @@ public class MainActivity extends AppCompatActivity {
         long overallStartTime = System.currentTimeMillis();
         int processedFrames = 0;
 
-        // [FIX] Reset frame counter at start of measurement
+        // Reset frame counter at start of measurement
         frameCounter = 0;
 
         for (int frameIdx = 0; frameIdx < framesToProcess; frameIdx++) {
@@ -231,7 +231,6 @@ public class MainActivity extends AppCompatActivity {
 
         long overallEndTime = System.currentTimeMillis();
         float totalSeconds = (overallEndTime - overallStartTime) / 1000f;
-        float fps = (processedFrames > 0) ? (processedFrames / totalSeconds) : 0;
 
         double avgPrepMs = 0, avgInferenceMs = 0, avgPostMs = 0, avgTrackMs = 0, avgOpticalFlowMs = 0;
 
@@ -242,7 +241,7 @@ public class MainActivity extends AppCompatActivity {
             avgTrackMs = (totalTrackingTimeNs / (double) processedFrames) / 1_000_000.0;
             avgOpticalFlowMs = (totalOpticalFlowTimeNs / (double) processedFrames) / 1_000_000.0;
         }
-
+        double fps = 1000 / (avgPrepMs + avgInferenceMs + avgPostMs + avgTrackMs + avgOpticalFlowMs);
         double totalPrepMs = totalPreprocessingTimeNs / 1_000_000.0;
         double totalInferenceMs = totalInferenceTimeNs / 1_000_000.0;
         double totalPostMs = totalPostprocessingTimeNs / 1_000_000.0;
@@ -290,25 +289,19 @@ public class MainActivity extends AppCompatActivity {
         boolean isKeyframe = (frameCounter % KEYFRAME_INTERVAL == 0);
         List<Detection> result;
 
-        // ------------------------------------------------------------
-        // 1. MEASURE CONVERSION TIME (Runs on EVERY frame)
-        // ------------------------------------------------------------
-        long conversionStart = System.nanoTime();
+        // Grayscale conversion (runs on EVERY frame for optical flow)
         byte[] imageData = bitmapToGrayscale(frame);
-        long conversionDuration = System.nanoTime() - conversionStart;
-
-        // Add this to a new accumulator or Preprocessing
-        // We add to Preprocessing here so it shows up in your existing CSV
-        totalPreprocessingTimeNs += conversionDuration;
 
         if (isKeyframe) {
-            // ------------------------------------------------------------
-            // KEYFRAME BRANCH
-            // ------------------------------------------------------------
+            // ============================================================
+            // KEYFRAME BRANCH - Run YOLO + Tracker Update
+            // ============================================================
+            Log.d(TAG, "=== KEYFRAME: Running YOLO ===");
 
-            // YOLO (This has its own internal timers in runYOLODetection)
+            // YOLO detection (has its own internal timers)
             List<Detection> detections = runYOLODetection(frame);
 
+            // Convert detections to flat array for JNI
             float[] detectArray = new float[detections.size() * 6];
             for (int i = 0; i < detections.size(); i++) {
                 Detection d = detections.get(i);
@@ -320,7 +313,7 @@ public class MainActivity extends AppCompatActivity {
                 detectArray[i * 6 + 5] = d.confidence;
             }
 
-            // Update Tracker (Native Only)
+            // Update tracker with detections
             long trackStartTime = System.nanoTime();
             float[] trackerOutput = nativeUpdateWithDetections(
                     hybridTrackerHandle, detectArray, imageData, originalW, originalH);
@@ -329,11 +322,12 @@ public class MainActivity extends AppCompatActivity {
             result = parseTrackerOutput(trackerOutput);
 
         } else {
-            // ------------------------------------------------------------
-            // INTERMEDIATE BRANCH (The one you were missing!)
-            // ------------------------------------------------------------
+            // ============================================================
+            // INTERMEDIATE BRANCH - Run Optical Flow Only
+            // ============================================================
+            Log.d(TAG, "=== INTERMEDIATE: Running MOSSE ===");
 
-            // Native Optical Flow
+            // Native optical flow tracking
             long ofStartTime = System.nanoTime();
             float[] trackerOutput = nativeUpdateWithoutDetections(
                     hybridTrackerHandle, imageData, originalW, originalH);
@@ -351,43 +345,56 @@ public class MainActivity extends AppCompatActivity {
             return Collections.emptyList();
         }
 
-//        long prepStartTime = System.nanoTime();
+        // ============================================================
+        // START PREPROCESSING TIMING (includes letterboxing now!)
+        // ============================================================
+        long prepStartTime = System.nanoTime();
 
         int originalW = originalBitmap.getWidth();
         int originalH = originalBitmap.getHeight();
         int modelW = inputShape[2];
         int modelH = inputShape[1];
 
-        float scale = Math.min((float) modelW / originalW, (float) modelH / originalH);
+        // Calculate letterbox parameters
+        float scale = Math.min((float) modelW / originalW, (float) originalH / originalH);
         int newW = Math.round(originalW * scale);
         int newH = Math.round(originalH * scale);
         int padX = (modelW - newW) / 2;
         int padY = (modelH - newH) / 2;
 
-        Bitmap resized = Bitmap.createScaledBitmap(originalBitmap, newW, newH, true);
-        Bitmap letterbox = Bitmap.createBitmap(modelW, modelH, Bitmap.Config.ARGB_8888);
-        long prepStartTime = System.nanoTime();
-        android.graphics.Canvas canvas = new android.graphics.Canvas(letterbox);
-        canvas.drawColor(Color.rgb(114, 114, 114));
-        canvas.drawBitmap(resized, padX, padY, null);
-        resized.recycle();
+        // Reuse or create letterbox bitmap
+        if (reusableLetterboxBmp == null ||
+                reusableLetterboxBmp.getWidth() != modelW ||
+                reusableLetterboxBmp.getHeight() != modelH) {
+            reusableLetterboxBmp = Bitmap.createBitmap(modelW, modelH, Bitmap.Config.ARGB_8888);
+        }
 
+        // One-step letterboxing: draw with scaling directly using Rect
+        android.graphics.Canvas canvas = new android.graphics.Canvas(reusableLetterboxBmp);
+        canvas.drawColor(Color.rgb(128, 128, 128));
+        android.graphics.Rect dst = new android.graphics.Rect(padX, padY, padX + newW, padY + newH);
+        canvas.drawBitmap(originalBitmap, null, dst, null);
+
+        // Get tensor info
         Tensor inputTensor = tflite.getInputTensor(0);
         DataType modelInputType = inputTensor.dataType();
-
         Tensor.QuantizationParams qp = inputTensor.quantizationParams();
         final int zeroPoint = qp.getZeroPoint();
 
-        ByteBuffer inputBuffer = ByteBuffer.allocateDirect(inputTensor.numBytes());
-        inputBuffer.order(ByteOrder.nativeOrder());
-
+        // Extract pixels
         int[] pixels = new int[modelW * modelH];
-        letterbox.getPixels(pixels, 0, modelW, 0, 0, modelW, modelH);
-        letterbox.recycle();
+        reusableLetterboxBmp.getPixels(pixels, 0, modelW, 0, 0, modelW, modelH);
 
-        inputBuffer.rewind();
+        // Prepare payload array first (more efficient than direct ByteBuffer writes)
+        int pixelCount = modelW * modelH;
+        byte[] payload = new byte[pixelCount * 3];
 
+        // Convert pixels to appropriate format based on model data type
+        int o = 0;
         if (modelInputType == DataType.FLOAT32) {
+            // For float32, we still need to use ByteBuffer directly
+            ByteBuffer inputBuffer = ByteBuffer.allocateDirect(inputTensor.numBytes());
+            inputBuffer.order(ByteOrder.nativeOrder());
             for (int pixel : pixels) {
                 float r = ((pixel >> 16) & 0xFF) / 255.0f;
                 float g = ((pixel >> 8) & 0xFF) / 255.0f;
@@ -396,33 +403,65 @@ public class MainActivity extends AppCompatActivity {
                 inputBuffer.putFloat(g);
                 inputBuffer.putFloat(b);
             }
+            inputBuffer.rewind();
+
+            // END PREPROCESSING TIMING
+            totalPreprocessingTimeNs += (System.nanoTime() - prepStartTime);
+
+            // ============================================================
+            // INFERENCE
+            // ============================================================
+            Object[] inputs = {inputBuffer};
+            Map<Integer, Object> outputsMap = new HashMap<>();
+
+            if (outputDataTypes[0] == DataType.FLOAT32) {
+                outputsMap.put(0, new float[outputShapes[0][0]][outputShapes[0][1]][outputShapes[0][2]]);
+            } else {
+                outputsMap.put(0, new byte[outputShapes[0][0]][outputShapes[0][1]][outputShapes[0][2]]);
+            }
+
+            long inferenceStartTime = System.nanoTime();
+            tflite.runForMultipleInputsOutputs(inputs, outputsMap);
+            totalInferenceTimeNs += (System.nanoTime() - inferenceStartTime);
+
+            // ============================================================
+            // POSTPROCESSING
+            // ============================================================
+            long postStartTime = System.nanoTime();
+            List<Detection> detections = decodeOutput(outputsMap, originalW, originalH, modelW, modelH, padX, padY, scale);
+            totalPostprocessingTimeNs += (System.nanoTime() - postStartTime);
+
+            return detections;
+
         } else if (modelInputType == DataType.UINT8) {
             for (int pixel : pixels) {
-                byte r = (byte) (((pixel >> 16) & 0xFF) - zeroPoint);
-                byte g = (byte) (((pixel >> 8) & 0xFF) - zeroPoint);
-                byte b = (byte) ((pixel & 0xFF) - zeroPoint);
-                inputBuffer.put(r);
-                inputBuffer.put(g);
-                inputBuffer.put(b);
+                payload[o++] = (byte) (((pixel >> 16) & 0xFF) - zeroPoint);
+                payload[o++] = (byte) (((pixel >> 8) & 0xFF) - zeroPoint);
+                payload[o++] = (byte) ((pixel & 0xFF) - zeroPoint);
             }
         } else if (modelInputType == DataType.INT8) {
             for (int pixel : pixels) {
-                byte r = (byte) (((pixel >> 16) & 0xFF) - zeroPoint);
-                byte g = (byte) (((pixel >> 8) & 0xFF) - zeroPoint);
-                byte b = (byte) ((pixel & 0xFF) - zeroPoint);
-                inputBuffer.put(r);
-                inputBuffer.put(g);
-                inputBuffer.put(b);
+                payload[o++] = (byte) (((pixel >> 16) & 0xFF) - zeroPoint);
+                payload[o++] = (byte) (((pixel >> 8) & 0xFF) - zeroPoint);
+                payload[o++] = (byte) ((pixel & 0xFF) - zeroPoint);
             }
         } else {
             Log.e(TAG, "Unsupported input data type: " + modelInputType);
             return Collections.emptyList();
         }
 
+        // Bulk copy to ByteBuffer (more efficient)
+        ByteBuffer inputBuffer = ByteBuffer.allocateDirect(inputTensor.numBytes());
+        inputBuffer.order(ByteOrder.nativeOrder());
+        inputBuffer.put(payload);
         inputBuffer.rewind();
 
+        // END PREPROCESSING TIMING (now includes all preprocessing steps)
         totalPreprocessingTimeNs += (System.nanoTime() - prepStartTime);
 
+        // ============================================================
+        // INFERENCE
+        // ============================================================
         Object[] inputs = {inputBuffer};
         Map<Integer, Object> outputsMap = new HashMap<>();
 
@@ -436,10 +475,11 @@ public class MainActivity extends AppCompatActivity {
         tflite.runForMultipleInputsOutputs(inputs, outputsMap);
         totalInferenceTimeNs += (System.nanoTime() - inferenceStartTime);
 
+        // ============================================================
+        // POSTPROCESSING
+        // ============================================================
         long postStartTime = System.nanoTime();
-
         List<Detection> detections = decodeOutput(outputsMap, originalW, originalH, modelW, modelH, padX, padY, scale);
-
         totalPostprocessingTimeNs += (System.nanoTime() - postStartTime);
 
         return detections;
@@ -614,11 +654,8 @@ public class MainActivity extends AppCompatActivity {
             float cy = trackerOutput[i * 7 + 1];
             float w = trackerOutput[i * 7 + 2];
             float h = trackerOutput[i * 7 + 3];
-
-            // [FIX] Swapped indices 4 and 5 to match your C++ output format
             int classId = (int) trackerOutput[i * 7 + 4];
             float conf = trackerOutput[i * 7 + 5];
-
             int trackId = (int) trackerOutput[i * 7 + 6];
 
             result.add(new Detection(cx, cy, w, h, classId, conf, trackId));
@@ -727,6 +764,11 @@ public class MainActivity extends AppCompatActivity {
         if (nnApiDelegate != null) {
             nnApiDelegate.close();
             nnApiDelegate = null;
+        }
+
+        if (reusableLetterboxBmp != null && !reusableLetterboxBmp.isRecycled()) {
+            reusableLetterboxBmp.recycle();
+            reusableLetterboxBmp = null;
         }
 
         Log.i(TAG, "✓ Cleanup complete");
