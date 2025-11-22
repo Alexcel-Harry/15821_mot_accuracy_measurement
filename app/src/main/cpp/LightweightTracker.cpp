@@ -114,7 +114,18 @@ void LightweightTracker::initializeTrackers(const Mat& frame,
                         original_bbox.y * klt_scale,
                         original_bbox.width * klt_scale,
                         original_bbox.height * klt_scale);
-        
+        // === ADD THIS: Clamp to valid bounds ===
+        klt_bbox.x = std::max(0.0f, klt_bbox.x);
+        klt_bbox.y = std::max(0.0f, klt_bbox.y);
+
+        if (klt_bbox.x + klt_bbox.width > klt_size.width) {
+            klt_bbox.width = klt_size.width - klt_bbox.x;
+        }
+        if (klt_bbox.y + klt_bbox.height > klt_size.height) {
+            klt_bbox.height = klt_size.height - klt_bbox.y;
+        }
+// === END CLAMPING ===
+
         // Validate bounding box
         if (!isValidBoundingBox(klt_bbox, klt_size)) {
             LOGW("Invalid *scaled* bounding box for track_id=%d: [%.1f, %.1f, %.1f, %.1f]",
@@ -236,7 +247,16 @@ int LightweightTracker::updateTrackers(const Mat& frame,
                 obj.bbox.y = klt_bbox.y / klt_scale;
                 obj.bbox.width = klt_bbox.width / klt_scale;
                 obj.bbox.height = klt_bbox.height / klt_scale;
+                // === ADD THIS: Clamp to original frame size ===
+                obj.bbox.x = std::max(0.0f, obj.bbox.x);
+                obj.bbox.y = std::max(0.0f, obj.bbox.y);
 
+                if (obj.bbox.x + obj.bbox.width > original_size.width) {
+                    obj.bbox.width = original_size.width - obj.bbox.x;
+                }
+                if (obj.bbox.y + obj.bbox.height > original_size.height) {
+                    obj.bbox.height = original_size.height - obj.bbox.y;
+                }
                 obj.points = good_new_points;
                 obj.frames_tracked++;
 
@@ -291,15 +311,15 @@ bool LightweightTracker::isValidBoundingBox(const Rect2f& bbox, const Size& fram
     }
     
     // Check minimum size
-    if (bbox.width < 5.0f || bbox.height < 5.0f) {
-        return false;
-    }
-    
-    // Check maximum size
-    if (bbox.width > frame_size.width * 0.95f || 
-        bbox.height > frame_size.height * 0.95f) {
-        return false;
-    }
+//    if (bbox.width < 5.0f || bbox.height < 5.0f) {
+//        return false;
+//    }
+//
+//    // Check maximum size
+//    if (bbox.width > frame_size.width * 0.95f ||
+//        bbox.height > frame_size.height * 0.95f) {
+//        return false;
+//    }
     
     return true;
 }

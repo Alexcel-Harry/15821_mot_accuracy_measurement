@@ -86,7 +86,7 @@ public class MainActivity extends AppCompatActivity {
      * 000002.jpg
      * ...
      */
-    private static final String SEQUENCE_PATH = "/sdcard/Pictures/MOT17_resized_1280x720/train/MOT17-02-DPM";
+    private static final String SEQUENCE_PATH = "/sdcard/Pictures/MOT17_resized_1280x720/train/MOT17-09-DPM";
 
     /**
      * FPS for Kalman filter
@@ -109,7 +109,7 @@ public class MainActivity extends AppCompatActivity {
      * Keyframe interval (run YOLO every N frames)
      * Higher = faster, Lower = more accurate
      */
-    private static final int KEYFRAME_INTERVAL = 3;
+    private static final int KEYFRAME_INTERVAL = 7;
 
     /**
      * Detection confidence threshold
@@ -126,7 +126,7 @@ public class MainActivity extends AppCompatActivity {
     // ============================================================================
 
     // Model file name
-    private static final String MODEL_FILE = "yolo11n_finetune_full_integer_quant.tflite";
+    private static final String MODEL_FILE = "yolo11s_finetune_full_integer_quant.tflite";
 
     // TFLite interpreter
     private Interpreter tflite = null;
@@ -250,7 +250,7 @@ public class MainActivity extends AppCompatActivity {
 
         // Output file
         File appSpecificDir = getExternalFilesDir("results");
-        File outputFile = new File(appSpecificDir, sequenceName + "_results.txt");
+        File outputFile = new File(appSpecificDir, sequenceName + "-results.txt");
         // This will save the file to a path like:
         // /sdcard/Android/data/edu.cmu.cs.face/files/MOT17-02-DPM_results.txt
 
