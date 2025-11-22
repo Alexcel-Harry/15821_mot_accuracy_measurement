@@ -85,12 +85,27 @@ public class MainActivity extends AppCompatActivity {
     private long hybridTrackerHandle = 0;
     private int frameCounter = 0;
 
-    // --- Global latency accumulators (in nanoseconds) ---
-    private long totalPreprocessingTimeNs = 0;
-    private long totalInferenceTimeNs = 0;
-    private long totalPostprocessingTimeNs = 0;
-    private long totalTrackingTimeNs = 0;
-    private long totalOpticalFlowTimeNs = 0;
+    // Per-frame timing data storage
+    private static class FrameTiming {
+        int frameNumber;
+        double prepMs;
+        double inferenceMs;
+        double postMs;
+        double trackingMs;
+        double opflowMs;
+
+        FrameTiming(int frameNumber, double prepMs, double inferenceMs, double postMs,
+                    double trackingMs, double opflowMs) {
+            this.frameNumber = frameNumber;
+            this.prepMs = prepMs;
+            this.inferenceMs = inferenceMs;
+            this.postMs = postMs;
+            this.trackingMs = trackingMs;
+            this.opflowMs = opflowMs;
+        }
+    }
+
+    private List<FrameTiming> frameTimings = new ArrayList<>();
 
     // Native methods
     public native long nativeInitHybridTracker(int frameRate, int trackBuffer, int keyframeInterval);
@@ -112,6 +127,32 @@ public class MainActivity extends AppCompatActivity {
             this.classId = classId;
             this.confidence = confidence;
             this.trackId = trackId;
+        }
+    }
+
+    private static class YOLOResult {
+        List<Detection> detections;
+        double prepMs;
+        double inferenceMs;
+        double postMs;
+
+        YOLOResult(List<Detection> detections, double prepMs, double inferenceMs, double postMs) {
+            this.detections = detections;
+            this.prepMs = prepMs;
+            this.inferenceMs = inferenceMs;
+            this.postMs = postMs;
+        }
+    }
+
+    private static class TrackerResult {
+        List<Detection> detections;
+        double trackingMs;
+        double opflowMs;
+
+        TrackerResult(List<Detection> detections, double trackingMs, double opflowMs) {
+            this.detections = detections;
+            this.trackingMs = trackingMs;
+            this.opflowMs = opflowMs;
         }
     }
 
@@ -190,7 +231,7 @@ public class MainActivity extends AppCompatActivity {
         Log.i(TAG, "Processing " + framesToProcess + " frames for latency measurement");
 
         File appSpecificDir = getExternalFilesDir(null);
-        File outputFile = new File(appSpecificDir, sequenceName + "_amortized_latency.csv");
+        File outputFile = new File(appSpecificDir, sequenceName + "_per_frame_latency.csv");
         Log.i(TAG, "Output: " + outputFile.getAbsolutePath());
 
         Log.i(TAG, "");
@@ -232,27 +273,42 @@ public class MainActivity extends AppCompatActivity {
         long overallEndTime = System.currentTimeMillis();
         float totalSeconds = (overallEndTime - overallStartTime) / 1000f;
 
+        // Calculate statistics from per-frame data
         double avgPrepMs = 0, avgInferenceMs = 0, avgPostMs = 0, avgTrackMs = 0, avgOpticalFlowMs = 0;
+        double totalPrepMs = 0, totalInferenceMs = 0, totalPostMs = 0, totalTrackMs = 0, totalOpticalFlowMs = 0;
+
+        for (FrameTiming ft : frameTimings) {
+            totalPrepMs += ft.prepMs;
+            totalInferenceMs += ft.inferenceMs;
+            totalPostMs += ft.postMs;
+            totalTrackMs += ft.trackingMs;
+            totalOpticalFlowMs += ft.opflowMs;
+        }
 
         if (processedFrames > 0) {
-            avgPrepMs = (totalPreprocessingTimeNs / (double) processedFrames) / 1_000_000.0;
-            avgInferenceMs = (totalInferenceTimeNs / (double) processedFrames) / 1_000_000.0;
-            avgPostMs = (totalPostprocessingTimeNs / (double) processedFrames) / 1_000_000.0;
-            avgTrackMs = (totalTrackingTimeNs / (double) processedFrames) / 1_000_000.0;
-            avgOpticalFlowMs = (totalOpticalFlowTimeNs / (double) processedFrames) / 1_000_000.0;
+            avgPrepMs = totalPrepMs / processedFrames;
+            avgInferenceMs = totalInferenceMs / processedFrames;
+            avgPostMs = totalPostMs / processedFrames;
+            avgTrackMs = totalTrackMs / processedFrames;
+            avgOpticalFlowMs = totalOpticalFlowMs / processedFrames;
         }
-        double fps = 1000 / (avgPrepMs + avgInferenceMs + avgPostMs + avgTrackMs + avgOpticalFlowMs);
-        double totalPrepMs = totalPreprocessingTimeNs / 1_000_000.0;
-        double totalInferenceMs = totalInferenceTimeNs / 1_000_000.0;
-        double totalPostMs = totalPostprocessingTimeNs / 1_000_000.0;
-        double totalTrackMs = totalTrackingTimeNs / 1_000_000.0;
-        double totalOpticalFlowMs = totalOpticalFlowTimeNs / 1_000_000.0;
 
+        double fps = 1000.0 / (avgPrepMs + avgInferenceMs + avgPostMs + avgTrackMs + avgOpticalFlowMs);
+
+        // Write per-frame timing data to CSV
         try (FileWriter writer = new FileWriter(outputFile)) {
-            writer.write(String.format(Locale.US, "%.4f,%.4f,%.4f,%.4f,%.4f\n",
-                    avgPrepMs, avgInferenceMs, avgPostMs, avgTrackMs, avgOpticalFlowMs));
+            // Write header
+            writer.write("frame_number,prep_ms,inference_ms,post_ms,tracking_ms,opflow_ms\n");
+
+            // Write each frame's timing
+            for (FrameTiming ft : frameTimings) {
+                writer.write(String.format(Locale.US, "%d,%.4f,%.4f,%.4f,%.4f,%.4f\n",
+                        ft.frameNumber, ft.prepMs, ft.inferenceMs, ft.postMs,
+                        ft.trackingMs, ft.opflowMs));
+            }
+            Log.i(TAG, "✓ Wrote " + frameTimings.size() + " frames of timing data to CSV");
         } catch (IOException e) {
-            Log.e(TAG, "ERROR: Failed to write amortized latency results", e);
+            Log.e(TAG, "ERROR: Failed to write per-frame timing results", e);
         }
 
         Log.i(TAG, "");
@@ -283,11 +339,16 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private List<Detection> processFrame(Bitmap frame, int frameIdx) {
+        int frameNumber = frameIdx + 1;
         int originalW = frame.getWidth();
         int originalH = frame.getHeight();
 
         boolean isKeyframe = (frameCounter % KEYFRAME_INTERVAL == 0);
         List<Detection> result;
+
+        // Initialize timing for this frame
+        double prepMs = 0, inferenceMs = 0, postMs = 0;
+        double trackingMs = 0, opflowMs = 0;
 
         // Grayscale conversion (runs on EVERY frame for optical flow)
         byte[] imageData = bitmapToGrayscale(frame);
@@ -298,13 +359,16 @@ public class MainActivity extends AppCompatActivity {
             // ============================================================
             Log.d(TAG, "=== KEYFRAME: Running YOLO ===");
 
-            // YOLO detection (has its own internal timers)
-            List<Detection> detections = runYOLODetection(frame);
+            // YOLO detection (captures prep, inference, post times)
+            YOLOResult yoloResult = runYOLODetectionWithTiming(frame);
+            prepMs = yoloResult.prepMs;
+            inferenceMs = yoloResult.inferenceMs;
+            postMs = yoloResult.postMs;
 
             // Convert detections to flat array for JNI
-            float[] detectArray = new float[detections.size() * 6];
-            for (int i = 0; i < detections.size(); i++) {
-                Detection d = detections.get(i);
+            float[] detectArray = new float[yoloResult.detections.size() * 6];
+            for (int i = 0; i < yoloResult.detections.size(); i++) {
+                Detection d = yoloResult.detections.get(i);
                 detectArray[i * 6] = d.cx;
                 detectArray[i * 6 + 1] = d.cy;
                 detectArray[i * 6 + 2] = d.w;
@@ -313,13 +377,15 @@ public class MainActivity extends AppCompatActivity {
                 detectArray[i * 6 + 5] = d.confidence;
             }
 
-            // Update tracker with detections
-            long trackStartTime = System.nanoTime();
+            // Update tracker with detections (timing is done in C++)
             float[] trackerOutput = nativeUpdateWithDetections(
                     hybridTrackerHandle, detectArray, imageData, originalW, originalH);
-            totalTrackingTimeNs += (System.nanoTime() - trackStartTime);
 
-            result = parseTrackerOutput(trackerOutput);
+            // Parse tracker output and extract timing
+            TrackerResult trackerResult = parseTrackerOutputWithTiming(trackerOutput);
+            result = trackerResult.detections;
+            trackingMs = trackerResult.trackingMs;
+            opflowMs = trackerResult.opflowMs;
 
         } else {
             // ============================================================
@@ -327,17 +393,134 @@ public class MainActivity extends AppCompatActivity {
             // ============================================================
             Log.d(TAG, "=== INTERMEDIATE: Running MOSSE ===");
 
-            // Native optical flow tracking
-            long ofStartTime = System.nanoTime();
+            // No YOLO on intermediate frames
+            prepMs = 0;
+            inferenceMs = 0;
+            postMs = 0;
+
+            // Native optical flow tracking (timing is done in C++)
             float[] trackerOutput = nativeUpdateWithoutDetections(
                     hybridTrackerHandle, imageData, originalW, originalH);
-            totalOpticalFlowTimeNs += (System.nanoTime() - ofStartTime);
 
-            result = parseTrackerOutput(trackerOutput);
+            // Parse tracker output and extract timing
+            TrackerResult trackerResult = parseTrackerOutputWithTiming(trackerOutput);
+            result = trackerResult.detections;
+            trackingMs = trackerResult.trackingMs;
+            opflowMs = trackerResult.opflowMs;
         }
+
+        // Store this frame's timing
+        frameTimings.add(new FrameTiming(frameNumber, prepMs, inferenceMs, postMs,
+                trackingMs, opflowMs));
 
         frameCounter++;
         return result;
+    }
+
+    private YOLOResult runYOLODetectionWithTiming(Bitmap originalBitmap) {
+        if (tflite == null || inputShape == null) {
+            return new YOLOResult(Collections.emptyList(), 0, 0, 0);
+        }
+
+        // ============================================================
+        // START PREPROCESSING TIMING
+        // ============================================================
+        long prepStartTime = System.nanoTime();
+
+        int originalW = originalBitmap.getWidth();
+        int originalH = originalBitmap.getHeight();
+        int modelW = inputShape[2];
+        int modelH = inputShape[1];
+
+        // Calculate letterbox parameters
+        float scale = Math.min((float) modelW / originalW, (float) originalH / originalH);
+        int newW = Math.round(originalW * scale);
+        int newH = Math.round(originalH * scale);
+        int padX = (modelW - newW) / 2;
+        int padY = (modelH - newH) / 2;
+
+        // Reuse or create letterbox bitmap
+        if (reusableLetterboxBmp == null ||
+                reusableLetterboxBmp.getWidth() != modelW ||
+                reusableLetterboxBmp.getHeight() != modelH) {
+            reusableLetterboxBmp = Bitmap.createBitmap(modelW, modelH, Bitmap.Config.ARGB_8888);
+        }
+
+        // One-step letterboxing
+        android.graphics.Canvas canvas = new android.graphics.Canvas(reusableLetterboxBmp);
+        canvas.drawColor(Color.rgb(128, 128, 128));
+        android.graphics.Rect dst = new android.graphics.Rect(padX, padY, padX + newW, padY + newH);
+        canvas.drawBitmap(originalBitmap, null, dst, null);
+
+        // Get tensor info
+        Tensor inputTensor = tflite.getInputTensor(0);
+        DataType modelInputType = inputTensor.dataType();
+        Tensor.QuantizationParams qp = inputTensor.quantizationParams();
+        final int zeroPoint = qp.getZeroPoint();
+
+        // Extract pixels
+        int[] pixels = new int[modelW * modelH];
+        reusableLetterboxBmp.getPixels(pixels, 0, modelW, 0, 0, modelW, modelH);
+
+        int pixelCount = modelW * modelH;
+        byte[] payload = new byte[pixelCount * 3];
+
+        ByteBuffer inputBuffer;
+        int o = 0;
+
+        if (modelInputType == DataType.FLOAT32) {
+            inputBuffer = ByteBuffer.allocateDirect(inputTensor.numBytes());
+            inputBuffer.order(ByteOrder.nativeOrder());
+            for (int pixel : pixels) {
+                float r = ((pixel >> 16) & 0xFF) / 255.0f;
+                float g = ((pixel >> 8) & 0xFF) / 255.0f;
+                float b = (pixel & 0xFF) / 255.0f;
+                inputBuffer.putFloat(r);
+                inputBuffer.putFloat(g);
+                inputBuffer.putFloat(b);
+            }
+            inputBuffer.rewind();
+        } else if (modelInputType == DataType.UINT8 || modelInputType == DataType.INT8) {
+            for (int pixel : pixels) {
+                payload[o++] = (byte) (((pixel >> 16) & 0xFF) - zeroPoint);
+                payload[o++] = (byte) (((pixel >> 8) & 0xFF) - zeroPoint);
+                payload[o++] = (byte) ((pixel & 0xFF) - zeroPoint);
+            }
+            inputBuffer = ByteBuffer.allocateDirect(inputTensor.numBytes());
+            inputBuffer.order(ByteOrder.nativeOrder());
+            inputBuffer.put(payload);
+            inputBuffer.rewind();
+        } else {
+            Log.e(TAG, "Unsupported input data type: " + modelInputType);
+            return new YOLOResult(Collections.emptyList(), 0, 0, 0);
+        }
+
+        double prepMs = (System.nanoTime() - prepStartTime) / 1_000_000.0;
+
+        // ============================================================
+        // INFERENCE
+        // ============================================================
+        Object[] inputs = {inputBuffer};
+        Map<Integer, Object> outputsMap = new HashMap<>();
+
+        if (outputDataTypes[0] == DataType.FLOAT32) {
+            outputsMap.put(0, new float[outputShapes[0][0]][outputShapes[0][1]][outputShapes[0][2]]);
+        } else {
+            outputsMap.put(0, new byte[outputShapes[0][0]][outputShapes[0][1]][outputShapes[0][2]]);
+        }
+
+        long inferenceStartTime = System.nanoTime();
+        tflite.runForMultipleInputsOutputs(inputs, outputsMap);
+        double inferenceMs = (System.nanoTime() - inferenceStartTime) / 1_000_000.0;
+
+        // ============================================================
+        // POSTPROCESSING
+        // ============================================================
+        long postStartTime = System.nanoTime();
+        List<Detection> detections = decodeOutput(outputsMap, originalW, originalH, modelW, modelH, padX, padY, scale);
+        double postMs = (System.nanoTime() - postStartTime) / 1_000_000.0;
+
+        return new YOLOResult(detections, prepMs, inferenceMs, postMs);
     }
 
     private List<Detection> runYOLODetection(Bitmap originalBitmap) {
@@ -406,7 +589,7 @@ public class MainActivity extends AppCompatActivity {
             inputBuffer.rewind();
 
             // END PREPROCESSING TIMING
-            totalPreprocessingTimeNs += (System.nanoTime() - prepStartTime);
+//            totalPreprocessingTimeNs += (System.nanoTime() - prepStartTime);
 
             // ============================================================
             // INFERENCE
@@ -422,14 +605,14 @@ public class MainActivity extends AppCompatActivity {
 
             long inferenceStartTime = System.nanoTime();
             tflite.runForMultipleInputsOutputs(inputs, outputsMap);
-            totalInferenceTimeNs += (System.nanoTime() - inferenceStartTime);
+//            totalInferenceTimeNs += (System.nanoTime() - inferenceStartTime);
 
             // ============================================================
             // POSTPROCESSING
             // ============================================================
             long postStartTime = System.nanoTime();
             List<Detection> detections = decodeOutput(outputsMap, originalW, originalH, modelW, modelH, padX, padY, scale);
-            totalPostprocessingTimeNs += (System.nanoTime() - postStartTime);
+//            totalPostprocessingTimeNs += (System.nanoTime() - postStartTime);
 
             return detections;
 
@@ -457,7 +640,7 @@ public class MainActivity extends AppCompatActivity {
         inputBuffer.rewind();
 
         // END PREPROCESSING TIMING (now includes all preprocessing steps)
-        totalPreprocessingTimeNs += (System.nanoTime() - prepStartTime);
+//        totalPreprocessingTimeNs += (System.nanoTime() - prepStartTime);
 
         // ============================================================
         // INFERENCE
@@ -473,14 +656,14 @@ public class MainActivity extends AppCompatActivity {
 
         long inferenceStartTime = System.nanoTime();
         tflite.runForMultipleInputsOutputs(inputs, outputsMap);
-        totalInferenceTimeNs += (System.nanoTime() - inferenceStartTime);
+//        totalInferenceTimeNs += (System.nanoTime() - inferenceStartTime);
 
         // ============================================================
         // POSTPROCESSING
         // ============================================================
         long postStartTime = System.nanoTime();
         List<Detection> detections = decodeOutput(outputsMap, originalW, originalH, modelW, modelH, padX, padY, scale);
-        totalPostprocessingTimeNs += (System.nanoTime() - postStartTime);
+//        totalPostprocessingTimeNs += (System.nanoTime() - postStartTime);
 
         return detections;
     }
@@ -642,13 +825,60 @@ public class MainActivity extends AppCompatActivity {
         return selectedIndices;
     }
 
+    private TrackerResult parseTrackerOutputWithTiming(float[] trackerOutput) {
+        List<Detection> result = new ArrayList<>();
+        double opflowMs = 0;
+        double trackingMs = 0;
+
+        if (trackerOutput == null || trackerOutput.length < 2) {
+            return new TrackerResult(result, trackingMs, opflowMs);
+        }
+
+        // Last 2 elements are timing data: [opflow_time_ms, tracking_time_ms]
+        int timingFields = 2;
+        int dataLength = trackerOutput.length - timingFields;
+
+        // Extract timing data
+        opflowMs = trackerOutput[trackerOutput.length - 2];
+        trackingMs = trackerOutput[trackerOutput.length - 1];
+
+        // Parse track data (7 fields per track)
+        int numTracks = dataLength / 7;
+        for (int i = 0; i < numTracks; i++) {
+            float cx = trackerOutput[i * 7];
+            float cy = trackerOutput[i * 7 + 1];
+            float w = trackerOutput[i * 7 + 2];
+            float h = trackerOutput[i * 7 + 3];
+            int classId = (int) trackerOutput[i * 7 + 4];
+            float conf = trackerOutput[i * 7 + 5];
+            int trackId = (int) trackerOutput[i * 7 + 6];
+
+            result.add(new Detection(cx, cy, w, h, classId, conf, trackId));
+        }
+
+        return new TrackerResult(result, trackingMs, opflowMs);
+    }
+
     private List<Detection> parseTrackerOutput(float[] trackerOutput) {
         List<Detection> result = new ArrayList<>();
-        if (trackerOutput == null || trackerOutput.length == 0) {
+        if (trackerOutput == null || trackerOutput.length < 2) {
             return result;
         }
 
-        int numTracks = trackerOutput.length / 7;
+        // Last 2 elements are timing data: [opflow_time_ms, tracking_time_ms]
+        int timingFields = 2;
+        int dataLength = trackerOutput.length - timingFields;
+
+        // Extract timing data
+        float opflowTimeMs = trackerOutput[trackerOutput.length - 2];
+        float trackingTimeMs = trackerOutput[trackerOutput.length - 1];
+
+        // Accumulate timing (convert to nanoseconds)
+//        totalOpticalFlowTimeNs += (long)(opflowTimeMs * 1_000_000.0);
+//        totalTrackingTimeNs += (long)(trackingTimeMs * 1_000_000.0);
+
+        // Parse track data (7 fields per track)
+        int numTracks = dataLength / 7;
         for (int i = 0; i < numTracks; i++) {
             float cx = trackerOutput[i * 7];
             float cy = trackerOutput[i * 7 + 1];

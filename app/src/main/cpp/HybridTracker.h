@@ -68,6 +68,16 @@ public:
      */
     [[nodiscard]] int getFrameCount() const { return frame_count; }
 
+    /**
+     * Get last opflow time in milliseconds.
+     */
+    [[nodiscard]] double getLastOpflowTimeMs() const { return last_opflow_time_ms; }
+
+    /**
+     * Get last tracking time in milliseconds.
+     */
+    [[nodiscard]] double getLastTrackingTimeMs() const { return last_tracking_time_ms; }
+
 
 private:
     BYTETracker byteTracker;
@@ -78,6 +88,10 @@ private:
 
     // Store last ByteTrack results for reference
     vector<STrack> last_byte_tracks;
+
+    // Timing measurements (in milliseconds)
+    double last_opflow_time_ms;
+    double last_tracking_time_ms;
 
     /**
      * Convert MOSSE tracking results back to STrack format.

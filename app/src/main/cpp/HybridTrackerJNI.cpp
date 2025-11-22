@@ -59,18 +59,18 @@ std::vector<Object> javaToCppObjects(JNIEnv *env, jfloatArray javaDetections, in
 /**
  * Convert C++ vector<STrack> to Java float[]
  * Java format: [cx_norm, cy_norm, w_norm, h_norm, classId, conf, track_id] per track
+ * PLUS timing data at the end: [opflow_time_ms, tracking_time_ms]
  */
-jfloatArray cppToJavaTracks(JNIEnv *env, const std::vector<STrack>& cppTracks, int img_w, int img_h) {
-    if (cppTracks.empty()) {
-        return env->NewFloatArray(0);
-    }
-
+jfloatArray cppToJavaTracks(JNIEnv *env, const std::vector<STrack>& cppTracks, int img_w, int img_h,
+                            double opflow_time_ms, double tracking_time_ms) {
     int fieldsPerTrack = 7;
     int numTracks = cppTracks.size();
-    int numFloats = numTracks * fieldsPerTrack;
+    int timingFields = 2;  // opflow_time_ms, tracking_time_ms
+    int numFloats = (numTracks * fieldsPerTrack) + timingFields;
 
     jfloat* trackData = new jfloat[numFloats];
 
+    // Fill track data
     for (int i = 0; i < numTracks; ++i) {
         const auto& track = cppTracks[i];
         const auto& tlbr = track.tlbr;
@@ -97,11 +97,17 @@ jfloatArray cppToJavaTracks(JNIEnv *env, const std::vector<STrack>& cppTracks, i
         trackData[i * fieldsPerTrack + 6] = (float)track.track_id;
     }
 
+    // Append timing data at the end
+    int timingOffset = numTracks * fieldsPerTrack;
+    trackData[timingOffset + 0] = (float)opflow_time_ms;
+    trackData[timingOffset + 1] = (float)tracking_time_ms;
+
     jfloatArray javaTracks = env->NewFloatArray(numFloats);
     env->SetFloatArrayRegion(javaTracks, 0, numFloats, trackData);
     delete[] trackData;
 
-    LOGD("Converted %d C++ STracks to Java float[]", numTracks);
+    LOGD("Converted %d C++ STracks to Java float[] with timing (opflow=%.2fms, tracking=%.2fms)",
+         numTracks, opflow_time_ms, tracking_time_ms);
     return javaTracks;
 }
 
@@ -111,7 +117,7 @@ jfloatArray cppToJavaTracks(JNIEnv *env, const std::vector<STrack>& cppTracks, i
  */
 cv::Mat javaByteArrayToMat(JNIEnv *env, jbyteArray javaImageData, int width, int height, bool isGrayscale) {
     jbyte* imageData = env->GetByteArrayElements(javaImageData, 0);
-    
+
     cv::Mat mat;
     if (isGrayscale) {
         // Single channel grayscale
@@ -123,7 +129,7 @@ cv::Mat javaByteArrayToMat(JNIEnv *env, jbyteArray javaImageData, int width, int
         mat = cv::Mat(height, width, CV_8UC1);
         memcpy(mat.data, imageData, width * height);
     }
-    
+
     env->ReleaseByteArrayElements(javaImageData, imageData, JNI_ABORT);
     return mat;
 }
@@ -169,7 +175,7 @@ Java_edu_cmu_cs_face_MainActivity_nativeReleaseHybridTracker(
 
 /**
  * Update tracker with YOLO detections (keyframe)
- * Java: native float[] nativeUpdateWithDetections(long trackerPtr, float[] detections, 
+ * Java: native float[] nativeUpdateWithDetections(long trackerPtr, float[] detections,
  *                                                   byte[] imageData, int w, int h)
  */
 JNIEXPORT jfloatArray JNICALL
@@ -197,8 +203,12 @@ Java_edu_cmu_cs_face_MainActivity_nativeUpdateWithDetections(
     // Update hybrid tracker with detections
     std::vector<STrack> cppTracks = tracker->updateWithDetections(frame, cppDetections, img_w, img_h);
 
-    // Convert back to Java format
-    return cppToJavaTracks(env, cppTracks, img_w, img_h);
+    // Get timing data from tracker
+    double opflow_time_ms = tracker->getLastOpflowTimeMs();
+    double tracking_time_ms = tracker->getLastTrackingTimeMs();
+
+    // Convert back to Java format with timing data appended
+    return cppToJavaTracks(env, cppTracks, img_w, img_h, opflow_time_ms, tracking_time_ms);
 }
 
 /**
@@ -226,8 +236,12 @@ Java_edu_cmu_cs_face_MainActivity_nativeUpdateWithoutDetections(
     // Update hybrid tracker without detections (MOSSE tracking only)
     std::vector<STrack> cppTracks = tracker->updateWithoutDetections(frame, img_w, img_h);
 
-    // Convert back to Java format
-    return cppToJavaTracks(env, cppTracks, img_w, img_h);
+    // Get timing data from tracker
+    double opflow_time_ms = tracker->getLastOpflowTimeMs();
+    double tracking_time_ms = tracker->getLastTrackingTimeMs();
+
+    // Convert back to Java format with timing data appended
+    return cppToJavaTracks(env, cppTracks, img_w, img_h, opflow_time_ms, tracking_time_ms);
 }
 
 /**
@@ -245,7 +259,7 @@ Java_edu_cmu_cs_face_MainActivity_nativeResetHybridTracker(
         LOGE("Tracker pointer is null!");
         return;
     }
-    
+
     tracker->reset();
     LOGD("HybridTracker reset");
 }
