@@ -1,28 +1,2 @@
 ninja: Entering directory `/home/yihaosun/Desktop/YihaoSun/15821/15821_mot_accuracy_measurement/app/.cxx/Debug/2c2t3w6r/arm64-v8a'
-[1/3] Building CXX object CMakeFiles/bytetrack_jni.dir/HybridTrackerJNI.cpp.o
-In file included from /home/yihaosun/Desktop/YihaoSun/15821/15821_mot_accuracy_measurement/app/src/main/cpp/HybridTrackerJNI.cpp:10:
-In file included from /home/yihaosun/Desktop/YihaoSun/15821/15821_mot_accuracy_measurement/app/src/main/cpp/HybridTracker.h:4:
-/home/yihaosun/Desktop/YihaoSun/15821/15821_mot_accuracy_measurement/app/src/main/cpp/BYTETracker.h:37:48: warning: implicit conversion from 'long' to 'float' changes value from 9223372036854775807 to 9223372036854775808 [-Wimplicit-const-int-float-conversion]
-                bool extend_cost = false, float cost_limit = LONG_MAX, bool return_cost = true);
-                                                           ~ ^~~~~~~~
-/home/yihaosun/Android/Sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/linux-x86_64/lib64/clang/14.0.6/include/limits.h:47:19: note: expanded from macro 'LONG_MAX'
-#define LONG_MAX  __LONG_MAX__
-                  ^~~~~~~~~~~~
-<built-in>:102:22: note: expanded from here
-#define __LONG_MAX__ 9223372036854775807L
-                     ^~~~~~~~~~~~~~~~~~~~
-1 warning generated.
-[2/3] Building CXX object CMakeFiles/bytetrack_jni.dir/HybridTracker.cpp.o
-In file included from /home/yihaosun/Desktop/YihaoSun/15821/15821_mot_accuracy_measurement/app/src/main/cpp/HybridTracker.cpp:1:
-In file included from /home/yihaosun/Desktop/YihaoSun/15821/15821_mot_accuracy_measurement/app/src/main/cpp/HybridTracker.h:4:
-/home/yihaosun/Desktop/YihaoSun/15821/15821_mot_accuracy_measurement/app/src/main/cpp/BYTETracker.h:37:48: warning: implicit conversion from 'long' to 'float' changes value from 9223372036854775807 to 9223372036854775808 [-Wimplicit-const-int-float-conversion]
-                bool extend_cost = false, float cost_limit = LONG_MAX, bool return_cost = true);
-                                                           ~ ^~~~~~~~
-/home/yihaosun/Android/Sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/linux-x86_64/lib64/clang/14.0.6/include/limits.h:47:19: note: expanded from macro 'LONG_MAX'
-#define LONG_MAX  __LONG_MAX__
-                  ^~~~~~~~~~~~
-<built-in>:102:22: note: expanded from here
-#define __LONG_MAX__ 9223372036854775807L
-                     ^~~~~~~~~~~~~~~~~~~~
-1 warning generated.
-[3/3] Linking CXX shared library /home/yihaosun/Desktop/YihaoSun/15821/15821_mot_accuracy_measurement/app/build/intermediates/cxx/Debug/2c2t3w6r/obj/arm64-v8a/libbytetrack_jni.so
+ninja: no work to do.

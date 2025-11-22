@@ -58,20 +58,20 @@ public class MainActivity extends AppCompatActivity {
 
     private static final String SEQUENCE_PATH = "/sdcard/Pictures/MOT17_resized_1280x720/train/MOT17-02-DPM";
     private static final int VIDEO_FPS = 30;
-    private static final int TRACK_BUFFER = 30;
+    private static final int TRACK_BUFFER = VIDEO_FPS;
 
     // Set to 1 for Pure ByteTrack (C++ will bypass MOSSE), >1 for Hybrid
     private static final int KEYFRAME_INTERVAL = 3;
 
-    private static final float CONFIDENCE_THRESHOLD = 0.1f;
+    private static final float CONFIDENCE_THRESHOLD = 0.01f;
     private static final int REQUEST_STORAGE_PERMISSION = 1002;
-    private static final float NMS_THRESHOLD = 0.45f;
+    private static final float NMS_THRESHOLD = 0.4f;
 
     // ============================================================================
     // END CONFIGURATION
     // ============================================================================
 
-    private static final String MODEL_FILE = "yolo11n_full_integer_quant.tflite";
+    private static final String MODEL_FILE = "yolo11n_finetune_full_integer_quant.tflite";
 
     private Interpreter tflite = null;
     private NnApiDelegate nnApiDelegate = null;
@@ -91,6 +91,29 @@ public class MainActivity extends AppCompatActivity {
     private long totalPostprocessingTimeNs = 0;
     private long totalTrackingTimeNs = 0;
     private long totalOpticalFlowTimeNs = 0;
+
+    // Store tracking results (frame-by-frame) for output after measurement
+    private static class TrackResult {
+        int frameNumber;
+        int trackId;
+        float left, top, width, height;
+        float confidence;
+
+        TrackResult(int frameNumber, int trackId, float left, float top, float width, float height, float confidence) {
+            this.frameNumber = frameNumber;
+            this.trackId = trackId;
+            this.left = left;
+            this.top = top;
+            this.width = width;
+            this.height = height;
+            this.confidence = confidence;
+        }
+    }
+    private List<TrackResult> allTrackingResults = new ArrayList<>();
+
+    // Store original image dimensions
+    private int originalImageWidth = 0;
+    private int originalImageHeight = 0;
 
     // Native methods
     public native long nativeInitHybridTracker(int frameRate, int trackBuffer, int keyframeInterval);
@@ -190,8 +213,10 @@ public class MainActivity extends AppCompatActivity {
         Log.i(TAG, "Processing " + framesToProcess + " frames for latency measurement");
 
         File appSpecificDir = getExternalFilesDir(null);
-        File outputFile = new File(appSpecificDir, sequenceName + "_amortized_latency.csv");
-        Log.i(TAG, "Output: " + outputFile.getAbsolutePath());
+        File latencyOutputFile = new File(appSpecificDir, sequenceName + "_amortized_latency.csv");
+        File trackingOutputFile = new File(appSpecificDir, sequenceName + "-results.txt");
+        Log.i(TAG, "Latency output: " + latencyOutputFile.getAbsolutePath());
+        Log.i(TAG, "Tracking output: " + trackingOutputFile.getAbsolutePath());
 
         Log.i(TAG, "");
         Log.i(TAG, "=".repeat(60));
@@ -201,8 +226,9 @@ public class MainActivity extends AppCompatActivity {
         long overallStartTime = System.currentTimeMillis();
         int processedFrames = 0;
 
-        // Reset frame counter at start of measurement
+        // Reset frame counter and tracking results at start of measurement
         frameCounter = 0;
+        allTrackingResults.clear();
 
         for (int frameIdx = 0; frameIdx < framesToProcess; frameIdx++) {
             File imageFile = imageFiles[frameIdx];
@@ -223,15 +249,41 @@ public class MainActivity extends AppCompatActivity {
                 continue;
             }
 
-            processFrame(frame, frameIdx);
+            // Store original dimensions from first frame
+            if (frameIdx == 0) {
+                originalImageWidth = frame.getWidth();
+                originalImageHeight = frame.getHeight();
+            }
+
+            // Process frame and collect results (does NOT include file I/O)
+            List<Detection> trackingResults = processFrame(frame, frameNumber);
+
+            // Convert normalized detections to pixel coordinates and store
+            for (Detection det : trackingResults) {
+                float pixelCx = det.cx * originalImageWidth;
+                float pixelCy = det.cy * originalImageHeight;
+                float pixelW = det.w * originalImageWidth;
+                float pixelH = det.h * originalImageHeight;
+
+                float left = pixelCx - pixelW / 2.0f;
+                float top = pixelCy - pixelH / 2.0f;
+
+                allTrackingResults.add(new TrackResult(
+                        frameNumber, det.trackId, left, top, pixelW, pixelH, det.confidence
+                ));
+            }
 
             frame.recycle();
             processedFrames++;
         }
 
+        // ============================================================
+        // END OF MEASUREMENT WINDOW - Capture end time BEFORE file I/O
+        // ============================================================
         long overallEndTime = System.currentTimeMillis();
         float totalSeconds = (overallEndTime - overallStartTime) / 1000f;
 
+        // Calculate statistics
         double avgPrepMs = 0, avgInferenceMs = 0, avgPostMs = 0, avgTrackMs = 0, avgOpticalFlowMs = 0;
 
         if (processedFrames > 0) {
@@ -248,11 +300,36 @@ public class MainActivity extends AppCompatActivity {
         double totalTrackMs = totalTrackingTimeNs / 1_000_000.0;
         double totalOpticalFlowMs = totalOpticalFlowTimeNs / 1_000_000.0;
 
-        try (FileWriter writer = new FileWriter(outputFile)) {
+        // ============================================================
+        // FILE OUTPUT - Done AFTER measurement window
+        // ============================================================
+        Log.i(TAG, "");
+        Log.i(TAG, "Writing output files (not included in measurement)...");
+
+        // Write latency results
+        try (FileWriter writer = new FileWriter(latencyOutputFile)) {
             writer.write(String.format(Locale.US, "%.4f,%.4f,%.4f,%.4f,%.4f\n",
                     avgPrepMs, avgInferenceMs, avgPostMs, avgTrackMs, avgOpticalFlowMs));
         } catch (IOException e) {
             Log.e(TAG, "ERROR: Failed to write amortized latency results", e);
+        }
+
+        // Write tracking results in MOT format
+        // Format: <frame>, <id>, <bb_left>, <bb_top>, <bb_width>, <bb_height>, <conf>, <x>, <y>, <z>
+        try (FileWriter writer = new FileWriter(trackingOutputFile)) {
+            for (TrackResult result : allTrackingResults) {
+                writer.write(String.format(Locale.US, "%d,%d,%.2f,%.2f,%.2f,%.2f,%.4f,-1,-1,-1\n",
+                        result.frameNumber,
+                        result.trackId,
+                        result.left,
+                        result.top,
+                        result.width,
+                        result.height,
+                        result.confidence));
+            }
+            Log.i(TAG, "✓ Wrote " + allTrackingResults.size() + " tracking results");
+        } catch (IOException e) {
+            Log.e(TAG, "ERROR: Failed to write tracking results", e);
         }
 
         Log.i(TAG, "");
@@ -263,7 +340,8 @@ public class MainActivity extends AppCompatActivity {
         Log.i(TAG, "Frames: " + processedFrames);
         Log.i(TAG, "Time: " + String.format(Locale.US, "%.1f", totalSeconds) + "s");
         Log.i(TAG, "FPS: " + String.format(Locale.US, "%.2f", fps));
-        Log.i(TAG, "Output: " + outputFile.getAbsolutePath());
+        Log.i(TAG, "Latency output: " + latencyOutputFile.getAbsolutePath());
+        Log.i(TAG, "Tracking output: " + trackingOutputFile.getAbsolutePath());
         Log.i(TAG, "=".repeat(60));
 
         Log.i(TAG, "Amortized Averages (ms):");
@@ -282,7 +360,7 @@ public class MainActivity extends AppCompatActivity {
         Log.i(TAG, "=".repeat(60));
     }
 
-    private List<Detection> processFrame(Bitmap frame, int frameIdx) {
+    private List<Detection> processFrame(Bitmap frame, int frameNumber) {
         int originalW = frame.getWidth();
         int originalH = frame.getHeight();
 
@@ -356,7 +434,7 @@ public class MainActivity extends AppCompatActivity {
         int modelH = inputShape[1];
 
         // Calculate letterbox parameters
-        float scale = Math.min((float) modelW / originalW, (float) originalH / originalH);
+        float scale = Math.min((float) modelW / originalW, (float) modelH / originalH);
         int newW = Math.round(originalW * scale);
         int newH = Math.round(originalH * scale);
         int padX = (modelW - newW) / 2;
