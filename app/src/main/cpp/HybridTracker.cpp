@@ -30,70 +30,41 @@ vector<STrack> HybridTracker::updateWithDetections(const Mat& frame,
                                                    int frame_width,
                                                    int frame_height) {
     frame_count++;
-    if (this->keyframe_interval == 1) {
-        // ----------------------------------------------------------------
-        // OPTION A: PURE BYTETRACK MODE
-        // Bypass MOSSE entirely. Save ~15ms of overhead.
-        // ----------------------------------------------------------------
-        LOGD("Interval 1 detected: Running Pure ByteTrack Logic");
 
-        // Reset opflow time since no opflow is used
+    if (this->keyframe_interval == 1) {
+        // Pure ByteTrack mode (no MOSSE)
         last_opflow_time_ms = 0.0;
 
-        // 1. Direct ByteTrack Update with timing
         auto track_start = high_resolution_clock::now();
         vector<STrack> byte_tracks = byteTracker.update(objects);
         auto track_end = high_resolution_clock::now();
-        last_tracking_time_ms = duration<double, milli>(track_end - track_start).count();
 
+        last_tracking_time_ms = duration<double, milli>(track_end - track_start).count();
         last_byte_tracks = byte_tracks;
 
-        LOGD("Pure ByteTrack timing: tracking=%.2fms", last_tracking_time_ms);
         return byte_tracks;
     }
-    const int MAX_TRACKS = 100;
 
-    // [修改] 使用 std::vector 替代 C 风格数组，更安全
-    vector<int> klt_track_ids(MAX_TRACKS);
-    vector<int> klt_class_ids(MAX_TRACKS);
-    vector<float> klt_scores(MAX_TRACKS);
-    vector<Rect2f> klt_bboxes(MAX_TRACKS);
+    // ----------------------------------------------------------------
+    // HYBRID MODE (interval > 1)
+    // On keyframes: ONLY run ByteTrack + Initialize MOSSE
+    // NO updateTrackers() - that's wasteful!
+    // ----------------------------------------------------------------
 
-    // === OPFLOW TIMING START ===
-    auto opflow_start = high_resolution_clock::now();
-
-    int klt_count = lightweight_tracker.updateTrackers(
-            frame,
-            klt_track_ids.data(),   // 使用 .data() 传递指针
-            klt_class_ids.data(),
-            klt_scores.data(),
-            klt_bboxes.data(),
-            MAX_TRACKS
-    );
-
-    auto opflow_end = high_resolution_clock::now();
-    // === OPFLOW TIMING END ===
-
-    vector<STrack> klt_tracks = convertMOSSEResultsToSTracks(
-            klt_track_ids.data(), klt_class_ids.data(), klt_scores.data(),
-            klt_bboxes.data(), klt_count,
-            frame_width, frame_height
-    );
-
-    // === TRACKING TIMING START ===
     auto tracking_start = high_resolution_clock::now();
-
-    if (!klt_tracks.empty()) {
-        LOGD("Keyframe %d: Resyncing %zu ByteTrack KFs with KLT results", frame_count, klt_tracks.size());
-        byteTracker.resync_kalman_filters(klt_tracks);
-    }
-
+    auto tracking_end = tracking_start;
+    auto opflow_start = tracking_start;
+    auto opflow_end = tracking_start;
+    tracking_start = high_resolution_clock::now();
+    // Step 1: Run ByteTrack with YOLO detections
     LOGD("Keyframe %d: Running ByteTrack with %zu detections", frame_count, objects.size());
     vector<STrack> byte_tracks = byteTracker.update(objects);
     last_byte_tracks = byte_tracks;
 
     LOGD("ByteTrack returned %zu tracks", byte_tracks.size());
-
+    tracking_end = high_resolution_clock::now();
+    opflow_start = high_resolution_clock::now();
+    // Step 2: Initialize MOSSE trackers from ByteTrack for next frames
     if (!byte_tracks.empty() && !frame.empty()) {
         vector<int> track_ids;
         vector<int> class_ids;
@@ -110,10 +81,7 @@ vector<STrack> HybridTracker::updateWithDetections(const Mat& frame,
             float x2 = track.tlbr[2];
             float y2 = track.tlbr[3];
 
-            float width = x2 - x1;
-            float height = y2 - y1;
-
-            bboxes.emplace_back(x1, y1, width, height);
+            bboxes.emplace_back(x1, y1, x2-x1, y2-y1);
         }
 
         lightweight_tracker.initializeTrackers(
@@ -124,17 +92,18 @@ vector<STrack> HybridTracker::updateWithDetections(const Mat& frame,
                 bboxes.data(),
                 track_ids.size()
         );
+        opflow_end = high_resolution_clock::now();
+        LOGD("Initialized %zu optical flow trackers", track_ids.size());
     }
 
-    auto tracking_end = high_resolution_clock::now();
-    // === TRACKING TIMING END ===
+//    auto tracking_end = high_resolution_clock::now();
 
-    // Store timing measurements
+    // Store timing
     last_opflow_time_ms = duration<double, milli>(opflow_end - opflow_start).count();
     last_tracking_time_ms = duration<double, milli>(tracking_end - tracking_start).count();
 
-    LOGD("Hybrid mode timing: opflow=%.2fms, tracking=%.2fms",
-         last_opflow_time_ms, last_tracking_time_ms);
+    LOGD("Keyframe timing: tracking=%.2fms (ByteTrack + MOSSE init)",
+         last_tracking_time_ms);
 
     return byte_tracks;
 }
@@ -144,19 +113,13 @@ vector<STrack> HybridTracker::updateWithoutDetections(const Mat& frame,
                                                       int frame_height) {
     frame_count++;
 
-    LOGD("Intermediate frame %d: Running MOSSE tracking", frame_count);
-
     if (frame.empty()) {
-        LOGD("Empty frame, returning empty tracks");
-        // Reset timing
         last_opflow_time_ms = 0.0;
         last_tracking_time_ms = 0.0;
         return vector<STrack>();
     }
 
-    // Update MOSSE trackers
     const int MAX_TRACKS = 100;
-
     vector<int> track_ids(MAX_TRACKS);
     vector<int> class_ids(MAX_TRACKS);
     vector<float> scores(MAX_TRACKS);
@@ -166,39 +129,32 @@ vector<STrack> HybridTracker::updateWithoutDetections(const Mat& frame,
     auto opflow_start = high_resolution_clock::now();
 
     int count = lightweight_tracker.updateTrackers(
-            frame,
-            track_ids.data(),
-            class_ids.data(),
-            scores.data(),
-            bboxes.data(),
-            MAX_TRACKS
-    );
+            frame, track_ids.data(), class_ids.data(),
+            scores.data(), bboxes.data(), MAX_TRACKS);
 
     auto opflow_end = high_resolution_clock::now();
     // === OPFLOW TIMING END ===
 
     // === TRACKING TIMING START ===
-    // On intermediate frames, tracking = converting MOSSE results to STrack format
     auto tracking_start = high_resolution_clock::now();
 
-    // Convert MOSSE results back to STrack format
-    vector<STrack> result = convertMOSSEResultsToSTracks(
+    // Convert MOSSE results to STrack format (preserves track_ids!)
+    vector<STrack> mosse_tracks = convertMOSSEResultsToSTracks(
             track_ids.data(), class_ids.data(), scores.data(),
-            bboxes.data(), count,
-            frame_width, frame_height
-    );
+            bboxes.data(), count, frame_width, frame_height);
+
+    // Update ByteTrack's Kalman filters with MOSSE tracking results
+    if (!mosse_tracks.empty()) {
+        byteTracker.resync_kalman_filters(mosse_tracks);
+    }
 
     auto tracking_end = high_resolution_clock::now();
     // === TRACKING TIMING END ===
 
-    // Store timing
     last_opflow_time_ms = duration<double, milli>(opflow_end - opflow_start).count();
     last_tracking_time_ms = duration<double, milli>(tracking_end - tracking_start).count();
 
-    LOGD("Intermediate frame timing: opflow=%.2fms, tracking=%.2fms (STrack conversion)",
-         last_opflow_time_ms, last_tracking_time_ms);
-
-    return result;
+    return mosse_tracks;
 }
 
 vector<STrack> HybridTracker::convertMOSSEResultsToSTracks(const int* track_ids,

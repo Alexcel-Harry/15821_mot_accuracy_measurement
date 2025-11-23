@@ -56,12 +56,12 @@ public class MainActivity extends AppCompatActivity {
     // CONFIGURATION - MODIFY THESE VALUES
     // ============================================================================
 
-    private static final String SEQUENCE_PATH = "/sdcard/Pictures/MOT17_resized_1280x720/train/MOT17-02-DPM";
+    private static final String SEQUENCE_PATH = "/sdcard/Pictures/MOT17_resized_1280x720/train/MOT17-09-DPM";
     private static final int VIDEO_FPS = 30;
     private static final int TRACK_BUFFER = 30;
 
     // Set to 1 for Pure ByteTrack (C++ will bypass MOSSE), >1 for Hybrid
-    private static final int KEYFRAME_INTERVAL = 3;
+    private static final int KEYFRAME_INTERVAL = 7;
 
     private static final float CONFIDENCE_THRESHOLD = 0.1f;
     private static final int REQUEST_STORAGE_PERMISSION = 1002;
@@ -71,7 +71,7 @@ public class MainActivity extends AppCompatActivity {
     // END CONFIGURATION
     // ============================================================================
 
-    private static final String MODEL_FILE = "yolo11n_full_integer_quant.tflite";
+    private static final String MODEL_FILE = "yolo11n_finetune_full_integer_quant.tflite";
 
     private Interpreter tflite = null;
     private NnApiDelegate nnApiDelegate = null;
@@ -932,8 +932,8 @@ public class MainActivity extends AppCompatActivity {
                 try {
                     NnApiDelegate.Options nnApiOptions = new NnApiDelegate.Options();
                     nnApiOptions.setExecutionPreference(NnApiDelegate.Options.EXECUTION_PREFERENCE_SUSTAINED_SPEED);
-                    nnApiOptions.setAllowFp16(true);
-                    nnApiOptions.setUseNnapiCpu(false);
+                    nnApiOptions.setAllowFp16(false);
+                    nnApiOptions.setUseNnapiCpu(true);
 
                     nnApiDelegate = new NnApiDelegate(nnApiOptions);
                     opts.addDelegate(nnApiDelegate);
